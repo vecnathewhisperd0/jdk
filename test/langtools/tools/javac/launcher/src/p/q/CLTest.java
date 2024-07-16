@@ -41,10 +41,17 @@ import java.net.*;
 import java.util.*;
 import java.lang.classfile.ClassModel;
 import java.lang.classfile.ClassFile;
+import java.util.spi.ToolProvider;
 
 public class CLTest {
     public static void main(String... args) throws Exception {
         try {
+            ServiceLoader.load(ToolProvider.class, CLTest.class.getClassLoader()).stream()
+                    .map(ServiceLoader.Provider::get)
+                    .filter(toolProvider -> toolProvider.name().equals("Tool"))
+                    .findFirst()
+                    .orElseThrow();
+
             new CLTest().run();
         } catch (Throwable t) {
             t.printStackTrace();
@@ -54,7 +61,9 @@ public class CLTest {
 
     void run() throws Exception {
         String[] names = {
-                "p/q/CLTest.java", // (re)source files part of the multi-file protocol
+                "Tool.java",
+                "Tool.class",
+                "p/q/CLTest.java",
                 "p/q/CLTest.class",
                 "p/q/CLTest$Inner.class",
                 "p/q/CLTest2.class",

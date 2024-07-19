@@ -23,6 +23,8 @@
  * questions.
  */
 
+// unnamed package
+
 import java.io.PrintWriter;
 import java.util.spi.ToolProvider;
 

@@ -49,8 +49,8 @@ runs:
     - name: 'Checkout the JTReg source'
       uses: actions/checkout@v4
       with:
-        repository: openjdk/jtreg
-        ref: 2db8c37d248bc7198cbbc5b026ebcba9d9a23bfa
+        repository: sormuras/jtreg
+        ref: cherry-picked-commits
         path: jtreg/src
       if: steps.get-cached-jtreg.outputs.cache-hit != 'true'
 

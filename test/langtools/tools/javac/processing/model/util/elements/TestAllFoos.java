@@ -28,6 +28,7 @@
  * @library /tools/javac/lib
  * @modules java.compiler
  *          jdk.compiler
+ * @enablePreview false
  * @build   JavacTestingAbstractProcessor TestAllFoos
  * @compile -processor TestAllFoos -proc:only --release 8 --source-path modules/m1/pkg  modules/m1/pkg/C.java
  * @compile -processor TestAllFoos -proc:only --release 8 --source-path modules/m2/pkg  modules/m2/pkg/C.java

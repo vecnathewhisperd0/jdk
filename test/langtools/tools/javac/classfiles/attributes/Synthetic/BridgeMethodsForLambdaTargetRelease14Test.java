@@ -35,6 +35,7 @@
  * @compile --enable-preview --source ${jdk.version} --target ${jdk.version}
  *          SyntheticTestDriver.java
  *          ../lib/TestResult.java ../lib/TestBase.java
+ * @enablePreview false
  * @compile --source 14 -target 14 -XDdeduplicateLambdas=false BridgeMethodsForLambdaTargetRelease14Test.java
  * @run main/othervm --enable-preview SyntheticTestDriver BridgeMethodsForLambdaTargetRelease14Test
  */

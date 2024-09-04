@@ -29,6 +29,7 @@
  * @library /tools/javac/lib
  * @modules java.compiler
  *          jdk.compiler
+ * @enablePreview false
  * @build   JavacTestingAbstractProcessor TestPackageElement
  * @compile -processor TestPackageElement -proc:only             TestPackageElement.java
  * @compile -processor TestPackageElement -proc:only --release 8 TestPackageElement.java

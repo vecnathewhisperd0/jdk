@@ -27,6 +27,7 @@
  * @summary Test that ProcessingEnvironment.isPreviewEnabled works properly
  * @library /tools/javac/lib
  * @modules java.compiler
+ * @enablePreview false
  * @build   JavacTestingAbstractProcessor
  * @compile TestPreviewEnabled.java
  * @compile -processor TestPreviewEnabled -proc:only -source ${jdk.version} -AExpectedPreview=false                  TestSourceVersion.java

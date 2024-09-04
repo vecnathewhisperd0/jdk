@@ -28,6 +28,7 @@
  * @library /tools/javac/lib
  * @modules java.compiler
  *          jdk.compiler
+ * @enablePreview false
  * @build   JavacTestingAbstractProcessor TestGetModuleOf
  * @compile -processor TestGetModuleOf -proc:only TestGetModuleOf.java
  * @compile -processor TestGetModuleOf -proc:only -source 8 -Xlint:-options TestGetModuleOf.java

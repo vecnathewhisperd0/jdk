@@ -29,6 +29,7 @@
  * @library /tools/javac/lib
  * @modules java.compiler
  *          jdk.compiler
+ * @enablePreview false
  * @build   JavacTestingAbstractProcessor
  * @compile TestSourceVersion.java
  * @compile -processor TestSourceVersion -proc:only -source 1.8 -AExpectedVersion=RELEASE_8 HelloWorld.java

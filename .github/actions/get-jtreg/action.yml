@@ -67,6 +67,7 @@ runs:
         bash make/build.sh --jdk "$JDK"
         mkdir ../installed
         mv build/images/jtreg/* ../installed
+        ../installed/bin/jtreg -version
       working-directory: jtreg/src
       shell: bash
       if: steps.get-cached-jtreg.outputs.cache-hit != 'true'

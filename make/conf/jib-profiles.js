@@ -1185,7 +1185,7 @@ var getJibProfilesDependencies = function (input, common) {
             server: "jpg",
             product: "jtreg",
             version: "7.5",
-            build_number: "ci/24",
+            build_number: "ci/27",
             file: "bundles/jtreg-7.5+1.zip",
             environment_name: "JT_HOME",
             environment_path: input.get("jtreg", "home_path") + "/bin",

@@ -50,8 +50,8 @@ runs:
     - name: 'Checkout the JTReg source'
       uses: actions/checkout@v4
       with:
-        repository: sormuras/jtreg
-        ref: cherry-picked-commits
+        repository: openjdk/jtreg
+        ref: master
         path: jtreg/src
       if: steps.get-cached-jtreg.outputs.cache-hit != 'true'
 

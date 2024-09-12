@@ -27,7 +27,6 @@
  * @summary Verify annotations without processors warning not given for base module annotations.
  * @library /tools/javac/lib
  * @modules java.compiler
- * @enablePreview false
  * @build JavacTestingAbstractProcessor TestAnnotationsWithoutProcessors
  * @compile/ref=empty.out -XDrawDiagnostics -Xlint:processing,-options -processor TestAnnotationsWithoutProcessors --release 8 TestAnnotationsWithoutProcessors.java
  * @compile/ref=empty.out -XDrawDiagnostics -Xlint:processing -processor TestAnnotationsWithoutProcessors TestAnnotationsWithoutProcessors.java

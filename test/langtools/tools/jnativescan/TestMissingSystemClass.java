@@ -24,7 +24,6 @@
 /*
  * @test
  * @library /test/lib .. ./cases/modules
- * @enablePreview false
  * @build JNativeScanTestBase
  * @compile --release 20 cases/classpath/missingsystem/App.java
  * @run junit TestMissingSystemClass

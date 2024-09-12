@@ -27,7 +27,6 @@
  * @summary Compiler Implementation for Unnamed patterns and variables
  * @library /tools/javac/lib
  * @modules jdk.compiler
- * @enablePreview false
  * @build   JavacTestingAbstractProcessor
  * @compile TestUnnamedVariableElement8.java
  * @compile -source 8 -processor TestUnnamedVariableElement8 -proc:only TestUnnamedVariableElementData.java

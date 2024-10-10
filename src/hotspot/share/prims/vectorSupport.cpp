@@ -195,6 +195,7 @@ instanceOop VectorSupport::allocate_vector(InstanceKlass* ik, frame* fr, Registe
   Handle payload_instance = VectorSupport::allocate_vector_payload(ik, fr, reg_map, payload_value, CHECK_NULL);
   instanceOop vbox = ik->allocate_instance(CHECK_NULL);
   vector_VectorPayload::set_payload(vbox, payload_instance());
+  OrderAccess::release();
   return vbox;
 }
 

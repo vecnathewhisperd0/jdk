@@ -25,7 +25,6 @@
  * @test
  * @bug 8222378
  * @summary Test that ProcessingEnvironment.isPreviewEnabled works properly
- * @enablePreview false
  * @library /tools/javac/lib
  * @modules java.compiler
  * @build   JavacTestingAbstractProcessor

@@ -112,51 +112,21 @@ private:
 
 class JvmtiDeferredUpdates : public CHeapObj<mtCompiler> {
 
-  // Relocking has to be deferred if the lock owning thread is currently waiting on the monitor.
-  int _relock_count_after_wait;
+  address _original_pc;
 
   // Deferred updates of locals, expressions, and monitors
   GrowableArray<jvmtiDeferredLocalVariableSet*> _deferred_locals_updates;
 
-  void inc_relock_count_after_wait() {
-    _relock_count_after_wait++;
-  }
-
-  int get_and_reset_relock_count_after_wait() {
-    int result = _relock_count_after_wait;
-    _relock_count_after_wait = 0;
-    return result;
-  }
-
-  GrowableArray<jvmtiDeferredLocalVariableSet*>* deferred_locals() { return &_deferred_locals_updates; }
-
-  JvmtiDeferredUpdates() :
-    _relock_count_after_wait(0),
-    _deferred_locals_updates((AnyObj::set_allocation_type((address) &_deferred_locals_updates,
-                             AnyObj::C_HEAP), 1), mtCompiler) { }
-
 public:
+  JvmtiDeferredUpdates(address original_pc) :
+    _original_pc(original_pc),
+    _deferred_locals_updates((AnyObj::set_allocation_type((address) &_deferred_locals_updates,
+                                                          AnyObj::C_HEAP), 1), mtCompiler) { }
+
   ~JvmtiDeferredUpdates();
 
-  static void create_for(JavaThread* thread);
-
-  static GrowableArray<jvmtiDeferredLocalVariableSet*>* deferred_locals(JavaThread* jt) {
-    return jt->deferred_updates() == nullptr ? nullptr : jt->deferred_updates()->deferred_locals();
-  }
-
-  // Relocking has to be deferred if the lock owning thread is currently waiting on the monitor.
-  static int  get_and_reset_relock_count_after_wait(JavaThread* jt);
-  static void inc_relock_count_after_wait(JavaThread* thread);
-
-  // Delete deferred updates for the compiled frame with id 'frame_id' on the
-  // given thread's stack. The thread's JvmtiDeferredUpdates instance will be
-  // deleted too if no updates remain.
-  static void delete_updates_for_frame(JavaThread* jt, intptr_t* frame_id);
-
-  // Number of deferred updates
-  int count() const {
-    return _deferred_locals_updates.length() + (_relock_count_after_wait > 0 ? 1 : 0);
-  }
+  address original_pc() const { return _original_pc; }
+  GrowableArray<jvmtiDeferredLocalVariableSet*>* deferred_locals() { return &_deferred_locals_updates; }
 };
 
 #endif // SHARE_PRIMS_JVMTIDEFERREDUPDATES_HPP

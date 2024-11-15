@@ -70,7 +70,6 @@ private:
 
   Method*   _method;
   int       _bci;
-  intptr_t* _id;
   int       _vframe_id;
   GrowableArray<jvmtiDeferredLocalVariable*>* _locals;
   bool      _objects_are_deoptimized;
@@ -83,7 +82,6 @@ private:
   // JVM state
   Method*   method()                  const { return _method; }
   int       bci()                     const { return _bci; }
-  intptr_t* id()                      const { return _id; }
   int       vframe_id()               const { return _vframe_id; }
   bool      objects_are_deoptimized() const { return _objects_are_deoptimized; }
 
@@ -95,14 +93,11 @@ private:
   // Does the vframe match this jvmtiDeferredLocalVariableSet
   bool      matches(const vframe* vf);
 
-  // Does the underlying physical frame match this jvmtiDeferredLocalVariableSet
-  bool      matches(intptr_t* fr_id)        { return id() == fr_id; }
-
   // GC
   void      oops_do(OopClosure* f);
 
   // constructor
-  jvmtiDeferredLocalVariableSet(Method* method, int bci, intptr_t* id, int vframe_id);
+  jvmtiDeferredLocalVariableSet(Method* method, int bci, int vframe_id);
 
   // destructor
   ~jvmtiDeferredLocalVariableSet();

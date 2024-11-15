@@ -56,7 +56,6 @@ bool EscapeBarrier::objs_are_deoptimized(JavaThread* thread, frame fr) {
   bool result = false;
   if (list != nullptr) {
     for (int i = 0; i < list->length(); i++) {
-      guarantee(list->at(i)->matches(fr.id()), "must match");
       result = list->at(i)->objects_are_deoptimized();
     }
   }
@@ -303,15 +302,10 @@ static void set_objs_are_deoptimized(JavaThread* thread, frame fr) {
   // set in first/oldest update
   GrowableArrayView<jvmtiDeferredLocalVariableSet*>* list = fr.deferred_locals();
 
-  DEBUG_ONLY(bool found = false);
-  if (list != nullptr) {
-    for (int i = 0; i < list->length(); i++) {
-      guarantee (list->at(i)->matches(fr.id()), "must match");
-      DEBUG_ONLY(found = true);
-      list->at(i)->set_objs_are_deoptimized();
-    }
+  assert(list != nullptr && list->length() != 0, "variable set should exist at least for one vframe");
+  for (int i = 0; i < list->length(); i++) {
+    list->at(i)->set_objs_are_deoptimized();
   }
-  assert(found, "variable set should exist at least for one vframe");
 }
 
 // Deoptimize the given frame and deoptimize objects with optimizations based on

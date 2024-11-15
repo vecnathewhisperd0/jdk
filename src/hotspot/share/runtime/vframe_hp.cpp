@@ -127,9 +127,8 @@ void compiledVFrame::update_deferred_value(BasicType type, int index, jvalue val
     deferred = fr().create_deferred_locals();
   }
   if (locals == nullptr) {
-    locals = new jvmtiDeferredLocalVariableSet(method(), bci(), fr().id(), vframe_id());
+    locals = new jvmtiDeferredLocalVariableSet(method(), bci(), vframe_id());
     deferred->push(locals);
-    assert(locals->id() == fr().id(), "Huh? Must match");
   }
   locals->set_value_at(index, type, value);
 }
@@ -407,10 +406,9 @@ vframe* compiledVFrame::sender() const {
   }
 }
 
-jvmtiDeferredLocalVariableSet::jvmtiDeferredLocalVariableSet(Method* method, int bci, intptr_t* id, int vframe_id) {
+jvmtiDeferredLocalVariableSet::jvmtiDeferredLocalVariableSet(Method* method, int bci, int vframe_id) {
   _method = method;
   _bci = bci;
-  _id = id;
   _vframe_id = vframe_id;
   // Always will need at least one, must be on C heap
   _locals = new(mtCompiler) GrowableArray<jvmtiDeferredLocalVariable*> (1, mtCompiler);
@@ -428,7 +426,7 @@ jvmtiDeferredLocalVariableSet::~jvmtiDeferredLocalVariableSet() {
 bool jvmtiDeferredLocalVariableSet::matches(const vframe* vf) {
   if (!vf->is_compiled_frame()) return false;
   compiledVFrame* cvf = (compiledVFrame*)vf;
-  if (cvf->fr().id() == id() && cvf->vframe_id() == vframe_id()) {
+  if (cvf->vframe_id() == vframe_id()) {
     assert(cvf->method() == method() && cvf->bci() == bci(), "must agree");
     return true;
   }

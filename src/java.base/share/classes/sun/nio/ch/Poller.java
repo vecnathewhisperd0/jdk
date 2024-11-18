@@ -274,16 +274,16 @@ public abstract class Poller {
         }
     }
 
+    @Override
+    public String toString() {
+        return Objects.toIdentityString(this) + " [registered = " + map.size() + "]";
+    }
+
     /**
      * Returns the number I/O operations currently registered with this poller.
      */
     public int registered() {
         return map.size();
-    }
-
-    @Override
-    public String toString() {
-        return Objects.toIdentityString(this) + " [registered = " + registered() + "]";
     }
 
     /**
@@ -442,5 +442,26 @@ public abstract class Poller {
                 throw new InternalError(e);
             }
         }
+    }
+
+    /**
+     * Return the master poller or null if there is no master poller.
+     */
+    public static Poller masterPoller() {
+        return POLLERS.masterPoller();
+    }
+
+    /**
+     * Return the list of read pollers.
+     */
+    public static List<Poller> readPollers() {
+        return POLLERS.readPollers();
+    }
+
+    /**
+     * Return the list of write pollers.
+     */
+    public static List<Poller> writePollers() {
+        return POLLERS.writePollers();
     }
 }

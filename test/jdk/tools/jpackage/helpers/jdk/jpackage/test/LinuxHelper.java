@@ -40,8 +40,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import jdk.jpackage.internal.ApplicationLayout;
-import jdk.jpackage.internal.IOUtils;
+import jdk.jpackage.internal.util.PathUtils;
 import jdk.jpackage.test.Functional.ThrowingConsumer;
 import jdk.jpackage.test.PackageTest.PackageHandlers;
 
@@ -438,7 +437,7 @@ public final class LinuxHelper {
                     "Check value of [%s] key", key));
         }
 
-        // Verify the value of `Exec` key is escaped if required
+        // Verify the value of `Exec` key in is escaped if required
         String launcherPath = data.get("Exec");
         if (Pattern.compile("\\s").matcher(launcherPath).find()) {
             TKit.assertTrue(launcherPath.startsWith("\"")
@@ -578,7 +577,7 @@ public final class LinuxHelper {
 
     private static void verifyIconInScriptlet(Scriptlet scriptletType,
             List<String> scriptletBody, Path iconPathInPackage) {
-        final String dashMime = IOUtils.replaceSuffix(
+        final String dashMime = PathUtils.replaceSuffix(
                 iconPathInPackage.getFileName(), null).toString();
         final String xdgCmdName = "xdg-icon-resource";
 

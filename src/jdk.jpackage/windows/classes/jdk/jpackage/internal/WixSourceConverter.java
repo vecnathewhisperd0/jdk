@@ -52,6 +52,8 @@ import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stax.StAXResult;
 import javax.xml.transform.stream.StreamSource;
 import jdk.jpackage.internal.WixToolset.WixToolsetType;
+import jdk.jpackage.internal.resources.ResourceLocator;
+import jdk.jpackage.internal.util.XmlUtils;
 import org.w3c.dom.Document;
 import org.xml.sax.SAXException;
 
@@ -69,7 +71,7 @@ final class WixSourceConverter {
     WixSourceConverter(Path resourceDir) throws IOException {
         var buf = new ByteArrayOutputStream();
 
-        new OverridableResource("wix3-to-wix4-conv.xsl")
+        new OverridableResource("wix3-to-wix4-conv.xsl", ResourceLocator.class)
                 .setPublicName("wix-conv.xsl")
                 .setResourceDir(resourceDir)
                 .setCategory(I18N.getString("resource.wix-src-conv"))
@@ -98,7 +100,7 @@ final class WixSourceConverter {
 
         Document inputXmlDom;
         try {
-            inputXmlDom = IOUtils.initDocumentBuilder().parse(new ByteArrayInputStream(buf));
+            inputXmlDom = XmlUtils.initDocumentBuilder().parse(new ByteArrayInputStream(buf));
         } catch (SAXException ex) {
             // Malformed XML, don't run converter, save as is.
             resource.saveToFile(resourceSaveAsFile);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,7 @@
 package sun.security.provider;
 
 import java.io.*;
+import java.nio.file.Path;
 import java.security.*;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateFactory;
@@ -40,6 +41,7 @@ import sun.security.util.Debug;
 import sun.security.util.IOUtils;
 import sun.security.util.KeyStoreDelegator;
 
+import jdk.internal.access.SharedSecrets;
 /**
  * This class provides the keystore implementation referred to as "JKS".
  *
@@ -658,6 +660,7 @@ public abstract sealed class JavaKeyStore extends KeyStoreSpi {
             ByteArrayInputStream bais;
             byte[] encoded;
             int trustedKeyCount = 0, privateKeyCount = 0;
+            String storeName = null;
 
             if (stream == null)
                 return;
@@ -669,6 +672,18 @@ public abstract sealed class JavaKeyStore extends KeyStoreSpi {
                 dis = new DataInputStream(stream);
             }
 
+            if (debug != null) {
+                String keystorePath = SharedSecrets
+                                .getJavaIOFileInputStreamAccess()
+                                .getPath(stream);
+                if (keystorePath != null) {
+                    storeName = Path.of(keystorePath).getFileName()
+                                .toString();
+                    debug.println("JavaKeyStore: loading \""
+                        + ((storeName != null) ? storeName : "")
+                        + "\" keystore");
+                }
+            }
             // Body format: see store method
 
             int xMagic = dis.readInt();
@@ -786,8 +801,10 @@ public abstract sealed class JavaKeyStore extends KeyStoreSpi {
             }
 
             if (debug != null) {
-                debug.println("JavaKeyStore load: private key count: " +
-                    privateKeyCount + ". trusted key count: " + trustedKeyCount);
+                debug.println("JavaKeyStore loaded: \""
+                    + ((storeName != null) ? storeName : "")
+                    + "\" keystore with private key count: " + privateKeyCount
+                    + ". trusted key count: " + trustedKeyCount);
             }
 
             /*

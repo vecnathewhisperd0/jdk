@@ -27,8 +27,11 @@ package java.io;
 
 import java.nio.channels.FileChannel;
 import java.util.Arrays;
-import jdk.internal.util.ArraysSupport;
+
+import jdk.internal.access.JavaIOFileInputStreamAccess;
+import jdk.internal.access.SharedSecrets;
 import jdk.internal.event.FileReadEvent;
+import jdk.internal.util.ArraysSupport;
 import jdk.internal.vm.annotation.Stable;
 import sun.nio.ch.FileChannelImpl;
 
@@ -82,6 +85,29 @@ public class FileInputStream extends InputStream
 
     private volatile boolean closed;
 
+    static {
+        SharedSecrets.setJavaIOFileInputStreamAccess(
+            new JavaIOFileInputStreamAccess() {
+                public String getPath(InputStream is) {
+                    if (is == null) {
+                        return null; // Handle null InputStream
+                    }
+                    return switch (is) {
+                        case FileInputStream fis -> fis.path;
+                        case FilterInputStream filter -> {
+                            InputStream inner = filter.in;
+                            if (inner instanceof FileInputStream fis) {
+                                yield fis.path;
+                            } else {
+                                yield getPath(inner);
+                            }
+                        }
+                        default -> null;
+                    };
+                }
+            }
+        );
+    }
     // This field indicates whether the file is a regular file as some
     // operations need the current position which requires seeking
     private @Stable Boolean isRegularFile;

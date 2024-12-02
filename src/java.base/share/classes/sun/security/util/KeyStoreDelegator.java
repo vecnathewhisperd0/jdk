@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,6 +29,7 @@ import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.file.Path;
 import java.security.*;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateException;
@@ -36,6 +37,7 @@ import java.util.Date;
 import java.util.Enumeration;
 import java.util.Set;
 
+import jdk.internal.access.SharedSecrets;
 /**
  * This class delegates to a primary or secondary keystore implementation.
  *
@@ -284,7 +286,14 @@ public class KeyStoreDelegator extends KeyStoreSpi {
             }
 
             if (debug != null) {
-                debug.println("Loaded a keystore in " + type + " format");
+                String keystorePath = SharedSecrets
+                        .getJavaIOFileInputStreamAccess()
+                        .getPath(stream);
+                String storeName = (keystorePath != null)
+                        ? Path.of(keystorePath).getFileName().toString()
+                        : "";
+                debug.println("Loaded \"" + storeName + "\" keystore in " +
+                        type + " format");
             }
         }
     }

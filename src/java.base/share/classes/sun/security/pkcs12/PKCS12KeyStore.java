@@ -26,6 +26,7 @@
 package sun.security.pkcs12;
 
 import java.io.*;
+import java.nio.file.Path;
 import java.security.AccessController;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -75,7 +76,7 @@ import sun.security.pkcs.EncryptedPrivateKeyInfo;
 import sun.security.provider.JavaKeyStore.JKS;
 import sun.security.x509.AuthorityKeyIdentifierExtension;
 
-
+import jdk.internal.access.SharedSecrets;
 /**
  * This class provides the keystore implementation referred to as "PKCS12".
  * Implements the PKCS#12 PFX protected using the Password privacy mode.
@@ -1958,10 +1959,22 @@ public final class PKCS12KeyStore extends KeyStoreSpi {
         certPbeIterationCount = -1;
         macAlgorithm = null;
         macIterationCount = -1;
+        String storeName = null;
 
         if (stream == null)
            return;
 
+        if (debug != null) {
+            String keystorePath = SharedSecrets
+                    .getJavaIOFileInputStreamAccess()
+                    .getPath(stream);
+            if (keystorePath != null) {
+                storeName = Path.of(keystorePath).getFileName().toString();
+                debug.println("PKCS12KeyStore: loading \""
+                    + ((storeName != null) ? storeName : "")
+                    + "\" keystore");
+            }
+        }
         // reset the counter
         counter = 0;
 
@@ -2223,11 +2236,12 @@ public final class PKCS12KeyStore extends KeyStoreSpi {
         }
 
         if (debug != null) {
-            debug.println("PKCS12KeyStore load: private key count: " +
-                    privateKeyCount + ". secret key count: " + secretKeyCount +
-                    ". certificate count: " + certificateCount);
+            debug.println("PKCS12KeyStore loaded: \""
+                    + ((storeName != null) ? storeName : "")
+                    + "\" keystore with private key count: " + privateKeyCount
+                    + ". secret key count: " + secretKeyCount
+                    + ". certificate count: " + certificateCount);
         }
-
         certEntries.clear();
         allCerts.clear();
         keyList.clear();

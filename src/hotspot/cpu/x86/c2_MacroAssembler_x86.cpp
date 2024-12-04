@@ -50,7 +50,7 @@
 #endif
 
 // C2 compiled method's prolog code.
-void C2_MacroAssembler::verified_entry(int framesize, int stack_bang_size, bool fp_mode_24b, bool is_stub) {
+void C2_MacroAssembler::verified_entry(int framesize, int stack_bang_size, bool is_stub) {
 
   // WARNING: Initial instruction MUST be 5 bytes or longer so that
   // NativeJump::patch_verified_entry will be able to patch out the entry

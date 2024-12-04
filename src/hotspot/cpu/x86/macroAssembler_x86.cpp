@@ -3418,25 +3418,15 @@ XMMRegSet MacroAssembler::call_clobbered_xmm_registers() {
 #endif
 }
 
-static bool use_xmm_registers() { return UseSSE >= 1; }
-
 // C1 only ever uses the first double/float of the XMM register.
-static int xmm_save_size() { return UseSSE >= 2 ? sizeof(double) : sizeof(float); }
+static int xmm_save_size() { return sizeof(double); }
 
 static void save_xmm_register(MacroAssembler* masm, int offset, XMMRegister reg) {
-  if (UseSSE == 1) {
-    masm->movflt(Address(rsp, offset), reg);
-  } else {
-    masm->movdbl(Address(rsp, offset), reg);
-  }
+  masm->movdbl(Address(rsp, offset), reg);
 }
 
 static void restore_xmm_register(MacroAssembler* masm, int offset, XMMRegister reg) {
-  if (UseSSE == 1) {
-    masm->movflt(reg, Address(rsp, offset));
-  } else {
-    masm->movdbl(reg, Address(rsp, offset));
-  }
+  masm->movdbl(reg, Address(rsp, offset));
 }
 
 static int register_section_sizes(RegSet gp_registers, XMMRegSet xmm_registers,
@@ -3446,7 +3436,7 @@ static int register_section_sizes(RegSet gp_registers, XMMRegSet xmm_registers,
   gp_area_size = align_up(gp_registers.size() * Register::max_slots_per_register * VMRegImpl::stack_slot_size,
                          StackAlignmentInBytes);
   fp_area_size = 0;
-  xmm_area_size = (save_fpu && use_xmm_registers()) ? xmm_registers.size() * xmm_save_size() : 0;
+  xmm_area_size = save_fpu ? xmm_registers.size() * xmm_save_size() : 0;
 
   return gp_area_size + fp_area_size + xmm_area_size;
 }
@@ -3465,7 +3455,7 @@ void MacroAssembler::push_call_clobbered_registers_except(RegSet exclude, bool s
 
   push_set(gp_registers_to_push, 0);
 
-  if (save_fpu && use_xmm_registers()) {
+  if (save_fpu) {
     push_set(call_clobbered_xmm_registers(), gp_area_size + fp_area_size);
   }
 
@@ -3483,7 +3473,7 @@ void MacroAssembler::pop_call_clobbered_registers_except(RegSet exclude, bool re
   int total_save_size = register_section_sizes(gp_registers_to_pop, call_clobbered_xmm_registers(), restore_fpu,
                                                gp_area_size, fp_area_size, xmm_area_size);
 
-  if (restore_fpu && use_xmm_registers()) {
+  if (restore_fpu) {
     pop_set(call_clobbered_xmm_registers(), gp_area_size + fp_area_size);
   }
 
@@ -5806,39 +5796,7 @@ void MacroAssembler::generate_fill(BasicType t, bool aligned,
     subptr(count, 1<<(shift-1));
     BIND(L_skip_align2);
   }
-  if (UseSSE < 2) {
-    Label L_fill_32_bytes_loop, L_check_fill_8_bytes, L_fill_8_bytes_loop, L_fill_8_bytes;
-    // Fill 32-byte chunks
-    subptr(count, 8 << shift);
-    jcc(Assembler::less, L_check_fill_8_bytes);
-    align(16);
-
-    BIND(L_fill_32_bytes_loop);
-
-    for (int i = 0; i < 32; i += 4) {
-      movl(Address(to, i), value);
-    }
-
-    addptr(to, 32);
-    subptr(count, 8 << shift);
-    jcc(Assembler::greaterEqual, L_fill_32_bytes_loop);
-    BIND(L_check_fill_8_bytes);
-    addptr(count, 8 << shift);
-    jccb(Assembler::zero, L_exit);
-    jmpb(L_fill_8_bytes);
-
-    //
-    // length is too short, just fill qwords
-    //
-    BIND(L_fill_8_bytes_loop);
-    movl(Address(to, 0), value);
-    movl(Address(to, 4), value);
-    addptr(to, 8);
-    BIND(L_fill_8_bytes);
-    subptr(count, 1 << (shift + 1));
-    jcc(Assembler::greaterEqual, L_fill_8_bytes_loop);
-    // fall through to fill 4 bytes
-  } else {
+  {
     Label L_fill_32_bytes;
     if (!UseUnalignedLoadStores) {
       // align to 8 bytes, we know we are 4 byte aligned to start
@@ -5850,7 +5808,6 @@ void MacroAssembler::generate_fill(BasicType t, bool aligned,
     }
     BIND(L_fill_32_bytes);
     {
-      assert( UseSSE >= 2, "supported cpu only" );
       Label L_fill_32_bytes_loop, L_check_fill_8_bytes, L_fill_8_bytes_loop, L_fill_8_bytes;
       movdl(xtmp, value);
       if (UseAVX >= 2 && UseUnalignedLoadStores) {

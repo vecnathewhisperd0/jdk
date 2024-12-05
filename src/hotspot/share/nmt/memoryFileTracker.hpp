@@ -28,8 +28,8 @@
 #include "memory/allocation.hpp"
 #include "nmt/nmtCommon.hpp"
 #include "nmt/nmtNativeCallStackStorage.hpp"
-#include "nmt/virtualMemoryTracker.hpp"
 #include "nmt/vmatree.hpp"
+#include "nmt/vmtCommon.hpp"
 #include "runtime/mutex.hpp"
 #include "runtime/os.inline.hpp"
 #include "utilities/growableArray.hpp"
@@ -79,7 +79,7 @@ public:
     for (int d = 0; d < _files.length(); d++) {
       const MemoryFile* file = _files.at(d);
       for (int i = 0; i < mt_number_of_tags; i++) {
-        f(NMTUtil::index_to_tag(i), file->_summary.by_type(NMTUtil::index_to_tag(i)));
+        f(NMTUtil::index_to_tag(i), file->_summary.by_tag(NMTUtil::index_to_tag(i)));
       }
     }
   }

@@ -1311,6 +1311,9 @@ public final class Class<T> implements java.io.Serializable,
         return c;
     }
 
+    // Set by the JVM when creating the instance of this java.lang.Class
+    private transient int modifiers;
+
     /**
      * Returns the Java language modifiers for this class or interface, encoded
      * in an integer. The modifiers consist of the Java Virtual Machine's
@@ -1349,8 +1352,7 @@ public final class Class<T> implements java.io.Serializable,
      * @jls 9.1.1 Interface Modifiers
      * @jvms 4.1 The {@code ClassFile} Structure
      */
-    @IntrinsicCandidate
-    public native int getModifiers();
+    public int getModifiers() { return modifiers; }
 
     /**
      * {@return an unmodifiable set of the {@linkplain AccessFlag access

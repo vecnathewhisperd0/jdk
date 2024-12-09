@@ -241,6 +241,7 @@ public final class Class<T> implements java.io.Serializable,
         // prevents future JIT optimizations from assuming this final field is null.
         classLoader = loader;
         componentType = arrayComponentType;
+        modifiers = 0;
     }
 
     /**
@@ -1000,6 +1001,7 @@ public final class Class<T> implements java.io.Serializable,
 
     private transient Object classData; // Set by VM
     private transient Object[] signers; // Read by VM, mutable
+    private final transient int modifiers;  // Set by the VM
 
     // package-private
     Object getClassData() {
@@ -1310,9 +1312,6 @@ public final class Class<T> implements java.io.Serializable,
         }
         return c;
     }
-
-    // Set by the JVM when creating the instance of this java.lang.Class
-    private transient int modifiers;
 
     /**
      * Returns the Java language modifiers for this class or interface, encoded

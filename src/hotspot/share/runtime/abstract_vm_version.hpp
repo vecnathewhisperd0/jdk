@@ -104,8 +104,7 @@ class Abstract_VM_Version: AllStatic {
 
   // Name
   static const char* vm_name();
-  // Vendor
-  static const char* vm_vendor();
+
   // VM version information string printed by launcher (java -version)
   static const char* vm_info_string();
   static const char* vm_release();

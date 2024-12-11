@@ -201,8 +201,8 @@ void StatSampler::assert_system_property(const char* name, const char* value, TR
   // convert Java String to utf8 string
   char* system_value = java_lang_String::as_utf8_string(value_oop);
 
-  assert(strcmp(value, system_value) == 0, "property value mustn't differ from System.getProperty. Our value is: %s, System.getProperty is: %s",
-         value, system_value);
+  assert(strcmp(value, system_value) == 0, "property %s value mustn't differ from System.getProperty. Our value is: %s, System.getProperty is: %s",
+         name, value, system_value);
 #endif // ASSERT
 }
 
@@ -258,7 +258,7 @@ void StatSampler::create_system_property_instrumentation(TRAPS) {
   add_property_constant(JAVA_PROPERTY, "java.version", JDK_Version::java_version(), CHECK);
   add_property_constant(JAVA_PROPERTY, "java.vm.version", VM_Version::vm_release(), CHECK);
   add_property_constant(JAVA_PROPERTY, "java.vm.name", VM_Version::vm_name(), CHECK);
-  add_property_constant(JAVA_PROPERTY, "java.vm.vendor", VM_Version::vm_vendor(), CHECK);
+  add_property_constant(JAVA_PROPERTY, "java.vm.vendor", JDK_Version::runtime_vendor_vm(), CHECK);
   add_property_constant(JAVA_PROPERTY, "jdk.debug", VM_Version::jdk_debug_level(), CHECK);
 
   // Get remaining property constants via Arguments::get_property,

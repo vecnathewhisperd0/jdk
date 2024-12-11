@@ -431,8 +431,6 @@ void Arguments::init_version_specific_system_properties() {
       new SystemProperty("java.vm.specification.vendor",  spec_vendor, false));
   PropertyList_add(&_system_properties,
       new SystemProperty("java.vm.specification.version", buffer, false));
-  PropertyList_add(&_system_properties,
-      new SystemProperty("java.vm.vendor", VM_Version::vm_vendor(),  false));
 }
 
 /*

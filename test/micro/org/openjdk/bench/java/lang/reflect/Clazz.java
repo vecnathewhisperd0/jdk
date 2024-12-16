@@ -33,8 +33,11 @@ import org.openjdk.jmh.annotations.Measurement;
 import org.openjdk.jmh.annotations.Mode;
 import org.openjdk.jmh.annotations.OutputTimeUnit;
 import org.openjdk.jmh.annotations.Warmup;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.State;
 
 @BenchmarkMode(Mode.AverageTime)
+@State(Scope.Benchmark)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @Warmup(iterations = 10, time = 1, timeUnit = TimeUnit.SECONDS)
 @Measurement(iterations = 5, time = 2, timeUnit = TimeUnit.SECONDS)
@@ -63,6 +66,11 @@ public class Clazz {
         return Clazz.class.getModifiers();
     }
 
+    Clazz[] clazzArray = new Clazz[1];
+    @Benchmark
+    public int getAppArrayModifiers() throws NoSuchMethodException {
+        return clazzArray.getClass().getModifiers();
+    }
     /**
      * Get modifiers for an primitive array class through reflection
      *

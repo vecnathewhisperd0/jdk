@@ -66,10 +66,6 @@ TypeArrayKlass* TypeArrayKlass::create_klass(BasicType type,
   return ak;
 }
 
-jint TypeArrayKlass::compute_modifier_flags() const {
-  return JVM_ACC_ABSTRACT | JVM_ACC_FINAL | JVM_ACC_PUBLIC;
-}
-
 TypeArrayKlass* TypeArrayKlass::allocate(ClassLoaderData* loader_data, BasicType type, Symbol* name, TRAPS) {
   assert(TypeArrayKlass::header_size() <= InstanceKlass::header_size(),
       "array klasses must be same size as InstanceKlass");
@@ -92,9 +88,6 @@ TypeArrayKlass::TypeArrayKlass(BasicType type, Symbol* name) : ArrayKlass(name, 
   assert(size() >= TypeArrayKlass::header_size(), "bad size");
 
   set_class_loader_data(ClassLoaderData::the_null_class_loader_data());
-
-  // Compute modifier flags.
-  set_modifier_flags(compute_modifier_flags());
 }
 
 typeArrayOop TypeArrayKlass::allocate_common(int length, bool do_zero, TRAPS) {

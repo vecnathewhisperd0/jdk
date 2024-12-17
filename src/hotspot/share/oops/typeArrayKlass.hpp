@@ -51,8 +51,6 @@ class TypeArrayKlass : public ArrayKlass {
   jint max_length()                     { return _max_length; }
   void set_max_length(jint m)           { _max_length = m;    }
 
-  jint compute_modifier_flags() const;
-
   // testers
   DEBUG_ONLY(bool is_typeArray_klass_slow() const  { return true; })
 

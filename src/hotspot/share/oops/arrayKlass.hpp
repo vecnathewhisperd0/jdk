@@ -118,7 +118,6 @@ class ArrayKlass: public Klass {
   // Return a handle.
   static void     complete_create_array_klass(ArrayKlass* k, Klass* super_klass, ModuleEntry* module, TRAPS);
 
-
   // JVMTI support
   jint jvmti_class_status() const;
 

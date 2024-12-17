@@ -671,6 +671,12 @@ public final class ProvidersFilter {
     static {
         Filter tmpFilter = null;
         String fStr = SecurityProperties.getOverridableProperty(FILTER_PROP);
+        if (debug != null) {
+            debug.println("Filter property value read at this point:");
+            for (StackTraceElement ste : new Exception().getStackTrace()) {
+                debug.println(" ".repeat(4) + ste);
+            }
+        }
         if (fStr != null && !fStr.isEmpty()) {
             tmpFilter = new Filter(fStr);
         }

@@ -78,7 +78,7 @@ public class Clazz {
      * @throws NoSuchMethodException
      */
     @Benchmark
-    public int getArrayModifiers() throws NoSuchMethodException {
+    public int getArrayModifiers() {
         return int[].class.getModifiers();
     }
 

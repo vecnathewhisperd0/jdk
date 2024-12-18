@@ -68,7 +68,7 @@ public class Clazz {
 
     Clazz[] clazzArray = new Clazz[1];
     @Benchmark
-    public int getAppArrayModifiers() throws NoSuchMethodException {
+    public int getAppArrayModifiers() {
         return clazzArray.getClass().getModifiers();
     }
     /**

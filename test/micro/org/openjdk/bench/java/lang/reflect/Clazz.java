@@ -62,7 +62,7 @@ public class Clazz {
      * @throws NoSuchMethodException
      */
     @Benchmark
-    public int getModifiers() throws NoSuchMethodException {
+    public int getModifiers() {
         return Clazz.class.getModifiers();
     }
 

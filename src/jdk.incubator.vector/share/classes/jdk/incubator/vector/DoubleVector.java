@@ -3615,7 +3615,7 @@ public abstract class DoubleVector extends AbstractVector<Double> {
 
     @ForceInline
     static long byteArrayAddress(byte[] a, int index) {
-        return (long) Unsafe.ARRAY_BYTE_BASE_OFFSET + index;
+        return Unsafe.ARRAY_BYTE_BASE_OFFSET + index;
     }
 
     // ================================================

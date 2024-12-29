@@ -30,7 +30,7 @@ import java.util.Objects;
 
 /*
  * @test
- * @bug 8277850 8278949 8285793
+ * @bug 8277850 8278949 8285793 8346664
  * @summary C2: optimize mask checks in counted loops
  * @library /test/lib /
  * @run driver compiler.c2.irTests.TestShiftAndMask
@@ -136,6 +136,30 @@ public class TestShiftAndMask {
     @Test
     @IR(counts = { IRNode.AND_I, "1" })
     @IR(failOn = { IRNode.ADD_I, IRNode.LSHIFT_I })
+    public static int addShiftPlusConstMaskInt(int i, int j) {
+        return (j + ((i + 5) << 2)) & 3; // transformed to: return j & 3;
+    }
+
+    @Run(test = "addShiftPlusConstMaskInt")
+    public static void addShiftPlusConstMaskInt_runner() {
+        int i = RANDOM.nextInt();
+        int j = RANDOM.nextInt();
+        int res = addShiftPlusConstMaskInt(i, j);
+        if (res != (j & 3)) {
+            throw new RuntimeException("incorrect result: " + res);
+        }
+    }
+
+    @Test
+    @Arguments(values = {Argument.RANDOM_EACH, Argument.RANDOM_EACH})
+    @IR(counts = { IRNode.ADD_I, "2", IRNode.LSHIFT_I, "1" })
+    public static int addShiftPlusConstDisjointMaskInt(int i, int j) {
+        return (j + ((i + 5) << 2)) & 32; // NOT transformed even though (5<<2) & 32 == 0
+    }
+
+    @Test
+    @IR(counts = { IRNode.AND_I, "1" })
+    @IR(failOn = { IRNode.ADD_I, IRNode.LSHIFT_I })
     public static int addSshiftNonConstMaskInt(int i, int j, boolean flag) {
         int mask;
         if (flag) {
@@ -173,6 +197,23 @@ public class TestShiftAndMask {
         long i = RANDOM.nextLong();
         long j = RANDOM.nextLong();
         long res = addShiftMaskLong(i, j);
+        if (res != (j & 3)) {
+            throw new RuntimeException("incorrect result: " + res);
+        }
+    }
+
+    @Test
+    @IR(counts = { IRNode.AND_L, "1" })
+    @IR(failOn = { IRNode.ADD_L, IRNode.LSHIFT_L })
+    public static long addShiftPlusConstMaskLong(long i, long j) {
+        return (j + ((i - 5) << 2)) & 3; // transformed to: return j & 3;
+    }
+
+    @Run(test = "addShiftPlusConstMaskLong")
+    public static void addShiftPlusConstMaskLong_runner() {
+        long i = RANDOM.nextLong();
+        long j = RANDOM.nextLong();
+        long res = addShiftPlusConstMaskLong(i, j);
         if (res != (j & 3)) {
             throw new RuntimeException("incorrect result: " + res);
         }

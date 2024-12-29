@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2023, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,10 +31,9 @@ import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.nio.ByteBuffer;
+import java.net.SocketAddress;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -65,13 +64,15 @@ public class TestSocketAdapterEvents {
 
     public static void main(String[] args) throws Throwable {
         new TestSocketAdapterEvents().test();
+        IOHelper.testConnectException(TestSocketAdapterEvents::makeConnectException);
     }
 
-    public void test() throws Throwable {
+    private void test() throws Throwable {
         try (Recording recording = new Recording()) {
             try (ServerSocketChannel ssc = ServerSocketChannel.open()) {
-                recording.enable(IOEvent.EVENT_SOCKET_READ).withThreshold(Duration.ofMillis(0));
-                recording.enable(IOEvent.EVENT_SOCKET_WRITE).withThreshold(Duration.ofMillis(0));
+                recording.enable(IOEvent.EVENT_SOCKET_CONNECT);
+                recording.enable(IOEvent.EVENT_SOCKET_READ);
+                recording.enable(IOEvent.EVENT_SOCKET_WRITE);
                 recording.start();
 
                 InetAddress lb = InetAddress.getLoopbackAddress();
@@ -85,36 +86,38 @@ public class TestSocketAdapterEvents {
                              InputStream is = s.getInputStream()) {
 
                             int readInt = is.read();
-                            assertEquals(readInt, writeInt, "Wrong readInt");
+                            assertEquals(writeInt, readInt, "Wrong readInt");
                             addExpectedEvent(IOEvent.createSocketReadEvent(1, s));
 
                             int bytesRead = is.read(bs, 0, 3);
-                            assertEquals(bytesRead, 3, "Wrong bytesRead partial buffer");
+                            assertEquals(3, bytesRead, "Wrong bytesRead partial buffer");
                             addExpectedEvent(IOEvent.createSocketReadEvent(bytesRead, s));
 
                             bytesRead = is.read(bs);
-                            assertEquals(bytesRead, writeBuf.length, "Wrong bytesRead full buffer");
+                            assertEquals(writeBuf.length, bytesRead, "Wrong bytesRead full buffer");
                             addExpectedEvent(IOEvent.createSocketReadEvent(bytesRead, s));
 
                             // Try to read more, but writer have closed. Should
                             // get EOF.
                             readInt = is.read();
-                            assertEquals(readInt, -1, "Wrong readInt at EOF");
+                            assertEquals(-1, readInt, "Wrong readInt at EOF");
                             addExpectedEvent(IOEvent.createSocketReadEvent(-1, s));
                         }
                     }
                 });
                 readerThread.start();
 
-                try (SocketChannel sc = SocketChannel.open(ssc.getLocalAddress());
-                     Socket s = sc.socket(); OutputStream os = s.getOutputStream()) {
-
-                    os.write(writeInt);
-                    addExpectedEvent(IOEvent.createSocketWriteEvent(1, s));
-                    os.write(writeBuf, 0, 3);
-                    addExpectedEvent(IOEvent.createSocketWriteEvent(3, s));
-                    os.write(writeBuf);
-                    addExpectedEvent(IOEvent.createSocketWriteEvent(writeBuf.length, s));
+                try (SocketChannel sc = SocketChannel.open(); Socket s = sc.socket()) {
+                    s.connect(ssc.getLocalAddress());
+                    addExpectedEvent(IOEvent.createSocketConnectEvent(s));
+                    try (OutputStream os = s.getOutputStream()) {
+                        os.write(writeInt);
+                        addExpectedEvent(IOEvent.createSocketWriteEvent(1, s));
+                        os.write(writeBuf, 0, 3);
+                        addExpectedEvent(IOEvent.createSocketWriteEvent(3, s));
+                        os.write(writeBuf);
+                        addExpectedEvent(IOEvent.createSocketWriteEvent(writeBuf.length, s));
+                    }
                 }
 
                 readerThread.joinAndThrow();
@@ -123,5 +126,16 @@ public class TestSocketAdapterEvents {
                 IOHelper.verifyEquals(events, expectedEvents);
             }
         }
+    }
+
+    private static IOException makeConnectException(SocketAddress addr) throws Throwable {
+        IOException connectException = null;
+        try (SocketChannel sc = SocketChannel.open()) {
+            Socket s = sc.socket();
+            s.connect(addr);
+        } catch (IOException ioe) {
+            connectException = ioe;
+        }
+        return connectException;
     }
 }

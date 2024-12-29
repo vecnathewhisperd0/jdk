@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,7 +32,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.time.Duration;
+import java.net.SocketAddress;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -63,13 +63,15 @@ public class TestSocketEvents {
 
     public static void main(String[] args) throws Throwable {
         new TestSocketEvents().test();
+        IOHelper.testConnectException(TestSocketEvents::makeConnectException);
     }
 
     private void test() throws Throwable {
         try (Recording recording = new Recording()) {
             try (ServerSocket ss = new ServerSocket()) {
-                recording.enable(IOEvent.EVENT_SOCKET_READ).withThreshold(Duration.ofMillis(0));
-                recording.enable(IOEvent.EVENT_SOCKET_WRITE).withThreshold(Duration.ofMillis(0));
+                recording.enable(IOEvent.EVENT_SOCKET_CONNECT);
+                recording.enable(IOEvent.EVENT_SOCKET_READ);
+                recording.enable(IOEvent.EVENT_SOCKET_WRITE);
                 recording.start();
 
                 InetAddress lb = InetAddress.getLoopbackAddress();
@@ -81,21 +83,21 @@ public class TestSocketEvents {
                         byte[] bs = new byte[4];
                         try (Socket s = ss.accept(); InputStream is = s.getInputStream()) {
                             int readInt = is.read();
-                            assertEquals(readInt, writeInt, "Wrong readInt");
+                            assertEquals(writeInt, readInt, "Wrong readInt");
                             addExpectedEvent(IOEvent.createSocketReadEvent(1, s));
 
                             int bytesRead = is.read(bs, 0, 3);
-                            assertEquals(bytesRead, 3, "Wrong bytesRead partial buffer");
+                            assertEquals(3, bytesRead, "Wrong bytesRead partial buffer");
                             addExpectedEvent(IOEvent.createSocketReadEvent(bytesRead, s));
 
                             bytesRead = is.read(bs);
-                            assertEquals(bytesRead, writeBuf.length, "Wrong bytesRead full buffer");
+                            assertEquals(writeBuf.length, bytesRead, "Wrong bytesRead full buffer");
                             addExpectedEvent(IOEvent.createSocketReadEvent(bytesRead, s));
 
                             // Try to read more, but writer have closed. Should
                             // get EOF.
                             readInt = is.read();
-                            assertEquals(readInt, -1, "Wrong readInt at EOF");
+                            assertEquals(-1, readInt, "Wrong readInt at EOF");
                             addExpectedEvent(IOEvent.createSocketReadEvent(-1, s));
                         }
                     }
@@ -104,6 +106,7 @@ public class TestSocketEvents {
 
                 try (Socket s = new Socket()) {
                     s.connect(ss.getLocalSocketAddress());
+                    addExpectedEvent(IOEvent.createSocketConnectEvent(s));
                     try (OutputStream os = s.getOutputStream()) {
                         os.write(writeInt);
                         addExpectedEvent(IOEvent.createSocketWriteEvent(1, s));
@@ -120,5 +123,15 @@ public class TestSocketEvents {
                 IOHelper.verifyEquals(events, expectedEvents);
             }
         }
+    }
+
+    private static IOException makeConnectException(SocketAddress addr) throws Throwable {
+        IOException connectException = null;
+        try (Socket s = new Socket()) {
+            s.connect(addr);
+        } catch (IOException ioe) {
+            connectException = ioe;
+        }
+        return connectException;
     }
 }

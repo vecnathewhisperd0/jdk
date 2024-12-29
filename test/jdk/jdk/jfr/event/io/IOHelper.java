@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,14 +26,20 @@ package jdk.jfr.event.io;
 import static jdk.test.lib.Asserts.assertEquals;
 import static jdk.test.lib.Asserts.assertTrue;
 
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import jdk.jfr.Recording;
 import jdk.jfr.event.io.IOEvent.EventType;
 
 import jdk.jfr.consumer.RecordedEvent;
+import jdk.test.lib.Asserts;
 import jdk.test.lib.jfr.Events;
 
 
@@ -130,4 +136,56 @@ public class IOHelper {
         }
     }
 
+    public interface ConnectExceptionMaker {
+        /**
+         * Implementation should attempt to connect to the given address, which
+         * should cause an exception to be generated.
+         * @return the exception generated, or null if the connection was
+         *         unexpectedly successful.
+         * @throws Throwable if something else failed
+         */
+        IOException generateConnectException(SocketAddress addr) throws Throwable;
+    }
+
+    /**
+     * Attempt to test JFR events for an exception condition while attempting to connect
+     * a socket.  The given function attempts to make the connection which we would like to
+     * fail so we can inspect the associated JFR event.  To do this a range of IANA reserved
+     * ports are used which it is expected will be unused.
+     *
+     * @param func   an implementation of a connection attempt
+     * @throws Throwable
+     */
+    public static void testConnectException(ConnectExceptionMaker func) throws Throwable {
+        InetAddress lb = InetAddress.getLoopbackAddress();
+        boolean completed = false;
+        for (int port = 225; (completed == false)  && (port <= 241); ++port) {
+            completed = testConnectExceptionOnPort(new InetSocketAddress(lb, port), func);
+        }
+        if (! completed)
+            throw new Exception("Unable to setup connect exception");
+    }
+
+    private static boolean testConnectExceptionOnPort(SocketAddress addr, ConnectExceptionMaker func) throws Throwable {
+        try (Recording recording = new Recording()) {
+            recording.enable(IOEvent.EVENT_SOCKET_CONNECT_FAILED);
+            recording.start();
+
+            // try to connect to a port we expect to be unused
+            // to generate an exception
+            IOException connectException = func.generateConnectException(addr);
+            if (connectException == null)
+                return false;
+
+            recording.stop();
+            List<RecordedEvent> events = Events.fromRecording(recording);
+            Asserts.assertEquals(1, events.size());
+            RecordedEvent event = events.get(0);
+            Asserts.assertEquals(IOEvent.EVENT_SOCKET_CONNECT_FAILED, event.getEventType().getName());
+            Asserts.assertNotNull(connectException);
+            String eventMessage = event.getString("connectExceptionMessage");
+            Asserts.assertEquals(eventMessage, connectException.toString());
+            return true;
+        }
+    }
 }

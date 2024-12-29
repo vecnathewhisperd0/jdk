@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,10 +28,10 @@ import static jdk.test.lib.Asserts.assertEquals;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -61,13 +61,17 @@ public class TestSocketChannelEvents {
 
     public static void main(String[] args) throws Throwable {
         new TestSocketChannelEvents().test();
+        new TestSocketChannelEvents().testNonBlockingConnect();
+        IOHelper.testConnectException(TestSocketChannelEvents::makeBlockingConnectException);
+        IOHelper.testConnectException(TestSocketChannelEvents::makeNonBlockingConnectException);
     }
 
-    public void test() throws Throwable {
+    private void test() throws Throwable {
         try (Recording recording = new Recording()) {
             try (ServerSocketChannel ssc = ServerSocketChannel.open()) {
-                recording.enable(IOEvent.EVENT_SOCKET_READ).withThreshold(Duration.ofMillis(0));
-                recording.enable(IOEvent.EVENT_SOCKET_WRITE).withThreshold(Duration.ofMillis(0));
+                recording.enable(IOEvent.EVENT_SOCKET_CONNECT);
+                recording.enable(IOEvent.EVENT_SOCKET_READ);
+                recording.enable(IOEvent.EVENT_SOCKET_WRITE);
                 recording.start();
 
                 InetAddress lb = InetAddress.getLoopbackAddress();
@@ -80,13 +84,13 @@ public class TestSocketChannelEvents {
                         ByteBuffer bufB = ByteBuffer.allocate(bufSizeB);
                         try (SocketChannel sc = ssc.accept()) {
                             int readSize = sc.read(bufA);
-                            assertEquals(readSize, bufSizeA, "Wrong readSize bufA");
+                            assertEquals(bufSizeA, readSize, "Wrong readSize bufA");
                             addExpectedEvent(IOEvent.createSocketReadEvent(bufSizeA, sc.socket()));
 
                             bufA.clear();
                             bufA.limit(1);
                             readSize = (int) sc.read(new ByteBuffer[] { bufA, bufB });
-                            assertEquals(readSize, 1 + bufSizeB, "Wrong readSize 1+bufB");
+                            assertEquals(1 + bufSizeB, readSize, "Wrong readSize 1+bufB");
                             addExpectedEvent(IOEvent.createSocketReadEvent(readSize, sc.socket()));
 
                             // We try to read, but client have closed. Should
@@ -94,7 +98,7 @@ public class TestSocketChannelEvents {
                             bufA.clear();
                             bufA.limit(1);
                             readSize = sc.read(bufA);
-                            assertEquals(readSize, -1, "Wrong readSize at EOF");
+                            assertEquals(-1, readSize, "Wrong readSize at EOF");
                             addExpectedEvent(IOEvent.createSocketReadEvent(-1, sc.socket()));
                         }
                     }
@@ -102,6 +106,7 @@ public class TestSocketChannelEvents {
                 readerThread.start();
 
                 try (SocketChannel sc = SocketChannel.open(ssc.getLocalAddress())) {
+                    addExpectedEvent(IOEvent.createSocketConnectEvent(sc.socket()));
                     ByteBuffer bufA = ByteBuffer.allocateDirect(bufSizeA);
                     ByteBuffer bufB = ByteBuffer.allocateDirect(bufSizeB);
                     for (int i = 0; i < bufSizeA; ++i) {
@@ -119,7 +124,7 @@ public class TestSocketChannelEvents {
                     bufA.clear();
                     bufA.limit(1);
                     int bytesWritten = (int) sc.write(new ByteBuffer[] { bufA, bufB });
-                    assertEquals(bytesWritten, 1 + bufSizeB, "Wrong bytesWritten 1+bufB");
+                    assertEquals(1 + bufSizeB, bytesWritten, "Wrong bytesWritten 1+bufB");
                     addExpectedEvent(IOEvent.createSocketWriteEvent(bytesWritten, sc.socket()));
                 }
 
@@ -129,5 +134,59 @@ public class TestSocketChannelEvents {
                 IOHelper.verifyEquals(events, expectedEvents);
             }
         }
+    }
+
+    private void testNonBlockingConnect() throws Throwable {
+        try (Recording recording = new Recording()) {
+            try (ServerSocketChannel ssc = ServerSocketChannel.open()) {
+                recording.enable(IOEvent.EVENT_SOCKET_CONNECT);
+                recording.start();
+
+                InetAddress lb = InetAddress.getLoopbackAddress();
+                ssc.bind(new InetSocketAddress(lb, 0));
+                SocketAddress addr = ssc.getLocalAddress();
+
+                try (SocketChannel sc = SocketChannel.open()) {
+                    sc.configureBlocking(false);
+                    sc.connect(addr);
+                    try (SocketChannel serverSide = ssc.accept()) {
+                        while (! sc.finishConnect()) {
+                            Thread.sleep(1);
+                        }
+                    }
+                    addExpectedEvent(IOEvent.createSocketConnectEvent(sc.socket()));
+                }
+
+                recording.stop();
+                List<RecordedEvent> events = Events.fromRecording(recording);
+                IOHelper.verifyEquals(events, expectedEvents);
+            }
+        }
+    }
+
+    private static IOException makeBlockingConnectException(SocketAddress addr) throws Throwable {
+        IOException connectException = null;
+        try (SocketChannel sc = SocketChannel.open(addr)) {
+        } catch (IOException ioe) {
+            connectException = ioe;
+        }
+        return connectException;
+    }
+
+    private static IOException makeNonBlockingConnectException(SocketAddress addr) throws Throwable {
+        IOException connectException = null;
+        try (SocketChannel sc = SocketChannel.open()) {
+            sc.configureBlocking(false);
+            try {
+                boolean connected = sc.connect(addr);
+                while (!connected) {
+                    Thread.sleep(10);
+                    connected = sc.finishConnect();
+                }
+            } catch (IOException ioe) {
+                connectException = ioe;
+            }
+        }
+        return connectException;
     }
 }

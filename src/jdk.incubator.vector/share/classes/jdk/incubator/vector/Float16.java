@@ -39,6 +39,8 @@ import static java.lang.Float.float16ToFloat;
 import static java.lang.Float.floatToFloat16;
 import static java.lang.Integer.numberOfLeadingZeros;
 import static java.lang.Math.multiplyHigh;
+import jdk.internal.vm.annotation.ForceInline;
+import jdk.internal.vm.vector.Float16Math;
 
 /**
  * The {@code Float16} is a class holding 16-bit data
@@ -321,6 +323,7 @@ public final class Float16
     *
     * @param  f a {@code float}
     */
+    @ForceInline
     public static Float16 valueOf(float f) {
         return new Float16(floatToFloat16(f));
     }
@@ -764,6 +767,7 @@ public final class Float16
      * @jls 5.1.3 Narrowing Primitive Conversion
      */
     @Override
+    @ForceInline
     public byte byteValue() {
         return (byte)floatValue();
     }
@@ -785,6 +789,7 @@ public final class Float16
      * @jls 5.1.3 Narrowing Primitive Conversion
      */
     @Override
+    @ForceInline
     public short shortValue() {
         return (short)floatValue();
     }
@@ -800,6 +805,7 @@ public final class Float16
      * @jls 5.1.3 Narrowing Primitive Conversion
      */
     @Override
+    @ForceInline
     public int intValue() {
         return (int)floatValue();
     }
@@ -830,6 +836,7 @@ public final class Float16
      * @jls 5.1.2 Widening Primitive Conversion
      */
     @Override
+    @ForceInline
     public float floatValue() {
         return float16ToFloat(value);
     }
@@ -845,6 +852,7 @@ public final class Float16
      * @jls 5.1.2 Widening Primitive Conversion
      */
     @Override
+    @ForceInline
     public double doubleValue() {
         return (double)floatValue();
     }
@@ -1191,12 +1199,22 @@ public final class Float16
      * @see Math#sqrt(double)
      */
     public static Float16 sqrt(Float16 radicand) {
-        // Rounding path of sqrt(Float16 -> double) -> Float16 is fine
-        // for preserving the correct final value. The conversion
-        // Float16 -> double preserves the exact numerical value. The
-        // conversion of double -> Float16 also benefits from the
-        // 2p+2 property of IEEE 754 arithmetic.
-        return valueOf(Math.sqrt(radicand.doubleValue()));
+        // Explicitly unbox float16 radicand as intrinsic expects
+        // to receive short type arguments holding IEEE 754 binary16
+        // value.
+        short unboxed_radicand = float16ToRawShortBits(radicand);
+        short retval = Float16Math.sqrt(unboxed_radicand,
+            (f16) -> {
+                // Rounding path of sqrt(Float16 -> double) -> Float16 is fine
+                // for preserving the correct final value. The conversion
+                // Float16 -> double preserves the exact numerical value. The
+                // conversion of double -> Float16 also benefits from the
+                // 2p+2 property of IEEE 754 arithmetic.
+               double res = Math.sqrt(float16ToFloat(f16));
+               return float16ToRawShortBits(valueOf(res));
+            }
+        );
+        return shortBitsToFloat16(retval);
     }
 
     /**
@@ -1398,11 +1416,22 @@ public final class Float16
          *   harmless.
          */
 
-        // product is numerically exact in float before the cast to
-        // double; not necessary to widen to double before the
-        // multiply.
-        double product = (double)(a.floatValue() * b.floatValue());
-        return valueOf(product + c.doubleValue());
+        // Explicitly unbox float16 values as intrinsic expects
+        // to receive short type arguments holding IEEE 754 binary16
+        // values.
+        short unboxed_a = float16ToRawShortBits(a);
+        short unboxed_b = float16ToRawShortBits(b);
+        short unboxed_c = float16ToRawShortBits(c);
+
+        short res = Float16Math.fma(unboxed_a, unboxed_b, unboxed_c,
+                (f16a, f16b, f16c) -> {
+                    // product is numerically exact in float before the cast to
+                    // double; not necessary to widen to double before the
+                    // multiply.
+                    double product = (double)(float16ToFloat(f16a) * float16ToFloat(f16b));
+                    return float16ToRawShortBits(valueOf(product + float16ToFloat(f16c)));
+                });
+        return shortBitsToFloat16(res);
     }
 
     /**

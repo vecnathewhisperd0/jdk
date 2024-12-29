@@ -28,7 +28,7 @@
 #include "runtime/javaThread.hpp"
 
 class AbstractCompiler;
-class ArenaStatCounter;
+class ArenaState;
 class BufferBlob;
 class ciEnv;
 class CompilerThread;
@@ -55,7 +55,7 @@ class CompilerThread : public JavaThread {
   AbstractCompiler*     _compiler;
   TimeStamp             _idle_time;
 
-  ArenaStatCounter*     _arena_stat;
+  ArenaState*     _arena_stat;
 
  public:
 
@@ -84,7 +84,9 @@ class CompilerThread : public JavaThread {
 
   CompileQueue* queue()        const             { return _queue; }
   CompilerCounters* counters() const             { return _counters; }
-  ArenaStatCounter* arena_stat() const           { return _arena_stat; }
+  ArenaState* arena_stat() const                 { return _arena_stat; }
+  void set_arenastat(ArenaState* v)              { assert((v == nullptr) != (_arena_stat == nullptr), "either one must be null");
+                                                   _arena_stat = v; }
 
   // Get/set the thread's compilation environment.
   ciEnv*        env()                            { return _env; }

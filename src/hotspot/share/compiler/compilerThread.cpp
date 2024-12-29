@@ -23,7 +23,7 @@
  */
 
 #include "precompiled.hpp"
-#include "compiler/compilationMemoryStatistic.hpp"
+#include "compiler/compilationMemStatInternals.hpp"
 #include "compiler/compileBroker.hpp"
 #include "compiler/compileTask.hpp"
 #include "compiler/compilerThread.hpp"
@@ -41,7 +41,7 @@ CompilerThread::CompilerThread(CompileQueue* queue,
   _buffer_blob = nullptr;
   _can_call_java = false;
   _compiler = nullptr;
-  _arena_stat = CompilationMemoryStatistic::enabled() ? new ArenaStatCounter : nullptr;
+  _arena_stat = nullptr;
 
 #ifndef PRODUCT
   _ideal_graph_printer = nullptr;

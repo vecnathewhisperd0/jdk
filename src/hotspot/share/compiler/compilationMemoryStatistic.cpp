@@ -30,7 +30,8 @@
 #include "c1/c1_Compilation.hpp"
 #endif
 #include "compiler/abstractCompiler.hpp"
-#include "compiler/compilationMemoryStatistic.hpp"
+#include "compiler/compilationMemStatInternals.inline.hpp"
+#include "compiler/compilerDefinitions.inline.hpp"
 #include "compiler/compilerDirectives.hpp"
 #include "compiler/compileTask.hpp"
 #include "compiler/compilerDefinitions.hpp"
@@ -45,100 +46,281 @@
 #endif
 #include "runtime/mutexLocker.hpp"
 #include "runtime/os.hpp"
+#include "utilities/checkedCast.hpp"
 #include "utilities/debug.hpp"
 #include "utilities/globalDefinitions.hpp"
 #include "utilities/ostream.hpp"
 #include "utilities/quickSort.hpp"
 #include "utilities/resourceHash.hpp"
 
-ArenaStatCounter::ArenaStatCounter() {
-  reset();
+
+static const char* phase_trc_id_to_string(int phase_trc_id) {
+  return COMPILER2_PRESENT(Phase::get_phase_trace_id_text((Phase::PhaseTraceId)phase_trc_id))
+         NOT_COMPILER2("");
 }
 
-void ArenaStatCounter::reset() {
-  _current = 0;
-  _peak = 0;
-  _current_by_tag.clear();
-  _peak_by_tag.clear();
-  _limit = 0;
-  _hit_limit = false;
-  _limit_in_process = false;
-  _live_nodes_at_peak = 0;
-  _active = false;
+// Arena-chunk stamping
+union chunkstamp_t {
+  uint64_t raw;
+  struct {
+    uint32_t tracked;
+    uint16_t arena_tag;
+    uint16_t phase_id;
+  };
+};
+STATIC_ASSERT(sizeof(chunkstamp_t) == sizeof(chunkstamp_t::raw));
+
+ArenaCounterTable::ArenaCounterTable() {
+  memset(_v, 0, sizeof(_v));
 }
 
-void ArenaStatCounter::start(size_t limit) {
-  reset();
-  _active = true;
-  _limit = limit;
+void ArenaCounterTable::copy_from(const ArenaCounterTable& other) {
+  memcpy(_v, other._v, sizeof(_v));
 }
 
-void ArenaStatCounter::end() {
-  _limit = 0;
-  _hit_limit = false;
-  _active = false;
-}
-
-void ArenaStatCounter::update_c2_node_count() {
-  assert(_active, "compilaton has not yet started");
-#ifdef COMPILER2
-  CompilerThread* const th = Thread::current()->as_Compiler_thread();
-  const CompileTask* const task = th->task();
-  if (task != nullptr &&
-      th->task()->compiler() != nullptr &&
-      th->task()->compiler()->type() == compiler_c2) {
-    const Compile* const comp = Compile::current();
-    if (comp != nullptr) {
-      _live_nodes_at_peak = comp->live_nodes();
+void ArenaCounterTable::summarize(size_t out[arena_tag_max]) const {
+  memset(out, 0, arena_tag_max * sizeof(size_t));
+  for (int i = 0; i < phase_trc_id_max; i++) {
+    for (int j = 0; j < arena_tag_max; j++) {
+      out[j] += _v[i][j];
     }
   }
-#endif
 }
 
-// Account an arena allocation or de-allocation.
-bool ArenaStatCounter::account(ssize_t delta, int tag) {
-  assert(_active, "compilaton has not yet started");
+void ArenaCounterTable::print_on(outputStream* st) const {
+  bool header_printed = false;
+  for (int phase_trc_id = 0; phase_trc_id < phase_trc_id_max; phase_trc_id++) {
+    size_t sum = 0;
+    for (int arena_tag = 0; arena_tag < arena_tag_max; arena_tag++) {
+      sum += at(phase_trc_id, arena_tag);
+    }
+    if (sum > 0) { // omit phases that did not contribute to allocation load
+      if (!header_printed) {
+        st->print("%24s %10s", "phase name", "total");
+        for (int arena_tag = 0; arena_tag < arena_tag_max; arena_tag++) {
+          st->print("%10s", Arena::tag_name[arena_tag]);
+        }
+        st->cr();
+        header_printed = true;
+      }
+      st->print("%24s ", phase_trc_id_to_string(phase_trc_id));
+      st->print(SIZE_FORMAT_W(10), sum);
+      for (int arena_tag = 0; arena_tag < arena_tag_max; arena_tag++) {
+        const size_t v = at(phase_trc_id, arena_tag);
+        st->print(SIZE_FORMAT_W(10), v);
+      }
+      st->cr();
+    }
+  }
+}
+
+PhaseIdStack::PhaseIdStack() : _depth(0) {
+  push(phase_trc_id_default); // "outside phase"
+}
+
+FootprintTimeline::FootprintTimeline() {
+  _pos = 0;
+  _entries[0].cur = _entries[0].start = _entries[0].peak = 0;
+  _entries[0].phase_trc_id = phase_trc_id_default; // "outside phase"
+}
+
+void FootprintTimeline::copy_from(const FootprintTimeline& other) {
+  memcpy(_entries, other._entries, sizeof(_entries));
+  _pos = other._pos;
+}
+
+void FootprintTimeline::print_entry_on(outputStream* st, unsigned pos) const {
+  const Entry& e = at(pos);
+  st->print("%2u %24s:", pos, phase_trc_id_to_string(e.phase_trc_id));
+  st->fill_to(30);
+  st->print("%12zu", e.start); // start
+  st->fill_to(40);
+  st->print("%12zu", e.cur); // end
+  st->fill_to(50);
+  st->print("%+12zd", (ssize_t)e.cur - e.start); // delta end
+  if (e.has_significant_local_peak()) {
+    st->fill_to(60);
+    st->print(" significant temporary peak: %zu (%+zd)", e.peak, (ssize_t)e.peak - e.start); // peak
+  }
+  st->cr();
+}
+
+void FootprintTimeline::print_on(outputStream* st) const {
+  if (_pos > 0) {
+    st->print_cr("%30s%12s%12s%12s", "", "start", "end", "end delta");
+    unsigned from = 0;
+    if (_pos > max_entries) {
+      st->print_cr("         (%u older entries skipped)", _pos - max_entries);
+      from = _pos - max_entries;
+    }
+    for (unsigned i = from; i < _pos; i++) {
+      print_entry_on(st, i);
+    }
+  }
+}
+
+void FootprintTimeline::on_phase_start(int phase_trc_id, size_t cur_abs) {
+  size_t start_footprint = 0;
+  const Entry& old = at(_pos);
+  start_footprint = old.cur;
+  // close old, open new entry; but only if the last phase is "interesting".
+  // An "interesting" phase is one that causes a footprint change (end != start),
+  // and/or one that has a local peak that significantly raises above either starting
+  // or ending footprint.
+  if (old.did_footprint_change() || old.has_significant_local_peak()) {
+    _pos++;
+  }
+  Entry& e = at(_pos);
+  e.start = e.cur = e.peak = start_footprint;
+  e.phase_trc_id = phase_trc_id_max;
+}
+
+ArenaState::ArenaState(CompilerType comp_type, int comp_id, size_t limit, bool collect_details) :
+    _current(0), _peak(0), _live_nodes_current(0), _live_nodes_at_global_peak(0),
+    _limit(limit), _hit_limit(false), _limit_in_process(false), _collect_details(collect_details),
+    _comp_type(comp_type), _comp_id(comp_id)
+{}
+
+void ArenaState::on_phase_start(int phase_trc_id) {
+  _phase_id_stack.push(phase_trc_id);
+  _timeline.on_phase_start(phase_trc_id, _current);
+}
+
+void ArenaState::on_phase_end(int phase_trc_id) {
+  _phase_id_stack.pop(phase_trc_id);
+  _timeline.on_phase_start(_phase_id_stack.top(), _current); // parent phase "restarts"
+}
+
+int ArenaState::retrieve_live_node_count() const {
+  int result = 0;
+#ifdef COMPILER2
+  if (_comp_type == compiler_c2) {
+    // Update C2 node count
+    // Careful, Compile::current() may be NULL in a short time window when Compile itself
+    // is still being constructed.
+    if (Compile::current() != nullptr) {
+      result = Compile::current()->live_nodes();
+    }
+  }
+#endif // COMPILER2
+  return result;
+}
+
+// Account an arena allocation. Returns true if new peak reached.
+bool ArenaState::on_arena_chunk_allocation(size_t size, int arena_tag, uint64_t* stamp) {
   bool rc = false;
-#ifdef ASSERT
-  // Note: if this fires, we free more arena memory under the scope of the
-  // CompilationMemoryHistoryMark than we allocate. This cannot be since we
-  // assume arena allocations in CompilerThread to be stack bound and symmetric.
-  assert(delta >= 0 || ((ssize_t)_current + delta) >= 0,
-         "Negative overflow (d=%zd %zu %zu)", delta, _current, _peak);
-#endif
-  // Update totals
-  _current += delta;
-  _current_by_tag.add(tag, delta);
-  // Did we reach a peak?
+
+  const size_t old_current = _current;
+  _current += size;
+  assert(_current >= old_current, "Overflow");
+
+  _timeline.on_footprint_change(_current);
+
+  const int phase_trc_id = _phase_id_stack.top();
+
+  _counters_current.add(size, phase_trc_id, arena_tag);
+  _live_nodes_current = retrieve_live_node_count();
+
+  // Did we reach a global peak?
   if (_current > _peak) {
     _peak = _current;
-    assert(delta > 0, "Sanity (%zu %zu)", _current, _peak);
-    update_c2_node_count();
-    _peak_by_tag = _current_by_tag;
-    rc = true;
+    // snapshot all current counters
+    _counters_at_global_peak.copy_from(_counters_current);
+    // snapshot live nodes
+    _live_nodes_at_global_peak = _live_nodes_current;
     // Did we hit the memory limit?
     if (!_hit_limit && _limit > 0 && _peak > _limit) {
       _hit_limit = true;
     }
+    // report peak back
+    rc = true;
   }
+
+  // calculate arena chunk stamp
+  chunkstamp_t cs;
+  cs.tracked = 1;
+  cs.arena_tag = checked_cast<uint16_t>(arena_tag);
+  cs.phase_id = checked_cast<uint16_t>(_phase_id_stack.top());
+  *stamp = cs.raw;
+
   return rc;
 }
 
-void ArenaStatCounter::print_on(outputStream* st) const {
-  st->print("%zu [", _peak);
-  for (int tag = 0; tag < _peak_by_tag.element_count(); tag++) {
-    if (_peak_by_tag.counter(tag) > 0) {
-      st->print("%s %zu ", _peak_by_tag.tag_name(tag), _peak_by_tag.counter(tag));
+void ArenaState::on_arena_chunk_deallocation(size_t size, uint64_t stamp) {
+  assert(_current >= size, "Underflow (%zu %zu)", size, _current);
+
+  // Extract tag and phase id from stamp
+  chunkstamp_t cs;
+  cs.raw = stamp;
+  assert(cs.tracked == 1, "Sanity");
+  const int arena_tag = cs.arena_tag;
+  assert(arena_tag >= 0 && arena_tag < arena_tag_max, "Arena Tag OOB (%d)", arena_tag_max);
+  const int phase_trc_id(cs.phase_id);
+  assert(phase_trc_id >= 0 && phase_trc_id < phase_trc_id_max, "Phase trace id OOB (%d)", phase_trc_id);
+
+  _current -= size;
+  _counters_current.sub(size, phase_trc_id, arena_tag);
+  _live_nodes_current = retrieve_live_node_count();
+  _timeline.on_footprint_change(_current);
+}
+
+// Used for logging, not for the report table generated with jcmd Compiler.memory
+void ArenaState::print_peak_state_on(outputStream* st) const {
+  st->print("%zu ", _peak);
+  if (_peak > 0) {
+    st->print("[");
+    size_t sums[arena_tag_max];
+    _counters_at_global_peak.summarize(sums);
+    bool print_comma = false;
+    for (int i = 0; i < arena_tag_max; i++) {
+      if (sums[i] > 0) {
+        if (print_comma) {
+          st->print_raw(", ");
+        }
+        st->print("%s %zu", Arena::tag_name[i], sums[i]);
+        print_comma = true;
+      }
+    }
+    st->print_cr("]");
+#ifdef COMPILER2
+    if (_comp_type == CompilerType::compiler_c2) {
+      st->print_cr("----- By phase and arena type, at arena usage peak (%zu) -----", _peak);
+      _counters_at_global_peak.print_on(st);
+      st->print_cr("------------- Arena allocation timelime by phase -----------------");
+      _timeline.print_on(st);
+      st->print_cr("------------------------------------------------------------------");
+    }
+#endif
+  } else {
+    st->cr();
+  }
+}
+
+#ifdef ASSERT
+void ArenaState::verify() const {
+  assert(_current <= _peak, "Sanity");
+#ifdef COMPILER2
+  size_t sum = 0;
+  for (int phaseid = 0; phaseid < phase_trc_id_max; phaseid++) {
+    for (int arena_tag = 0; arena_tag < arena_tag_max; arena_tag ++) {
+      sum += _counters_at_global_peak.at(phaseid, arena_tag);
     }
   }
-  st->print("]");
-#ifdef ASSERT
-  st->print(" (%zu->%zu)", _peak, _current);
+  assert(sum == _peak, "per phase counter mismatch - %zu, expected %zu", sum, _peak);
 #endif
 }
+#endif // ASSERT
 
 //////////////////////////
 // Backend
+
+// The backend is a hashtable.
+//
+// Key is a combination of method name (see FullMethodName) and compiler type. So, for each
+// compiler type, we keep information about the last compilation of a given method
+// (and if you need to know footprint of previous compilations, use Memstat print option).
+//
+// Value is a collection of various information
 
 class FullMethodName {
   Symbol* const _k;
@@ -163,15 +345,19 @@ public:
         Symbol::compute_hash(n._s);
   }
 
+  void print_on(outputStream* st) const {
+    ResourceMark rm;
+    st->print_raw(_k->as_C_string());
+    st->print_raw("::");
+    st->print_raw(_m->as_C_string());
+    st->put('(');
+    st->print_raw(_s->as_C_string());
+    st->put(')');
+  }
+
   char* as_C_string(char* buf, size_t len) const {
     stringStream ss(buf, len);
-    ResourceMark rm;
-    ss.print_raw(_k->as_C_string());
-    ss.print_raw("::");
-    ss.print_raw(_m->as_C_string());
-    ss.put('(');
-    ss.print_raw(_s->as_C_string());
-    ss.put(')');
+    print_on(&ss);
     return buf;
   }
   bool operator== (const FullMethodName& b) const {
@@ -180,9 +366,10 @@ public:
 };
 
 // Note: not mtCompiler since we don't want to change what we measure
-class MemStatEntry : public CHeapObj<mtInternal> {
+class MemStatEntry : public CHeapObj<mtInternal /* (sic) */> {
   const FullMethodName _method;
-  CompilerType _comptype;
+  CompilerType _comp_type;
+  int _comp_id;
   double _time;
   // How often this has been recompiled.
   int _num_recomp;
@@ -191,43 +378,79 @@ class MemStatEntry : public CHeapObj<mtInternal> {
   // active limit for this compilation, if any
   size_t _limit;
 
-  // peak usage, bytes, over all arenas
-  size_t _total;
-  // usage per arena tag when total peaked
-  ArenaCountersByTag _peak_by_tag;
-  // number of nodes (c2 only) when total peaked
-  unsigned _live_nodes_at_peak;
   const char* _result;
+
+  // Bytes total at global peak
+  size_t _peak;
+  // Bytes per arena tag.
+  size_t _peak_composition_per_arena_tag[arena_tag_max];
+  // Number of live nodes at global peak (C2 only)
+  unsigned _live_nodes_at_global_peak;
+
+  struct PerPhaseCounters {
+    // Bytes at global peak broken down on per phase and per arena type
+    ArenaCounterTable counters_at_global_peak;
+    FootprintTimeline timeline;
+  };
+  PerPhaseCounters* _per_phase_counters; // we only carry these if needed
+
+  MemStatEntry(const MemStatEntry& e); // deny
 
 public:
 
   MemStatEntry(FullMethodName method)
-    : _method(method), _comptype(compiler_c1),
+    : _method(method), _comp_type(compiler_none), _comp_id(-1),
       _time(0), _num_recomp(0), _thread(nullptr), _limit(0),
-      _total(0), _live_nodes_at_peak(0),
-      _result(nullptr) {
-    _peak_by_tag.clear();
+      _result(nullptr), _peak(0), _live_nodes_at_global_peak(0),
+      _per_phase_counters(nullptr) {
   }
 
-  void set_comptype(CompilerType comptype) { _comptype = comptype; }
+  ~MemStatEntry() {
+    if (_per_phase_counters != nullptr) {
+      FREE_C_HEAP_ARRAY(PerPhaseCounters, _per_phase_counters);
+    }
+  }
+
+  void set_comp_id(int comp_id) { _comp_id = comp_id; }
+  void set_comptype(CompilerType comptype) { _comp_type = comptype; }
   void set_current_time() { _time = os::elapsedTime(); }
   void set_current_thread() { _thread = Thread::current(); }
   void set_limit(size_t limit) { _limit = limit; }
   void inc_recompilation() { _num_recomp++; }
 
-  void set_total(size_t n) { _total = n; }
-  void set_peak_by_tag(ArenaCountersByTag peak_by_tag) { _peak_by_tag = peak_by_tag; }
-  void set_live_nodes_at_peak(unsigned n) { _live_nodes_at_peak = n; }
+  void set_from_state(const ArenaState* state) {
+    _comp_type = state->comp_type();
+    _comp_id = state->comp_id();
+    _limit = state->limit();
+    _peak = state->peak();
+    _live_nodes_at_global_peak = state->live_nodes_at_global_peak();
+    state->counters_at_global_peak().summarize(_peak_composition_per_arena_tag);
+#ifdef COMPILER2
+    if (_comp_type == CompilerType::compiler_c2 && state->collect_details()) {
+      if (_per_phase_counters == nullptr) {
+        _per_phase_counters = NEW_C_HEAP_OBJ(PerPhaseCounters, mtCompiler);
+      }
+      _per_phase_counters->counters_at_global_peak.copy_from(state->counters_at_global_peak());
+      _per_phase_counters->timeline.copy_from(state->timeline());
+    } else {
+      // theoretically impossible, since directive don't change and entry is bound to
+      // (comp_type+method). It only gets reused after recompilation with the same compiler.
+      // Just being defensive here.
+      FREE_C_HEAP_OBJ(_per_phase_counters);
+      _per_phase_counters = nullptr;
+    }
+#endif // COMPILER2
+  }
 
   void set_result(const char* s) { _result = s; }
 
-  size_t total() const { return _total; }
+  size_t peak() const { return _peak; }
 
   static void print_legend(outputStream* st) {
 #define LEGEND_KEY_FMT "%11s"
     st->print_cr("Legend:");
-    st->print_cr("  " LEGEND_KEY_FMT ": %s", "total", "memory allocated via arenas while compiling");
-    for (int tag = 0; tag < Arena::tag_count(); tag++) {
+    st->print_cr("  " LEGEND_KEY_FMT ": %s", "total", "peak memory allocated via arenas while compiling");
+    for (int tag = 0; tag < arena_tag_max; tag++) {
       st->print_cr("  " LEGEND_KEY_FMT ": %s", Arena::tag_name[tag], Arena::tag_desc[tag]);
     }
     st->print_cr("  " LEGEND_KEY_FMT ": %s", "result", "Result: 'ok' finished successfully, 'oom' hit memory limit, 'err' compilation failed");
@@ -235,6 +458,7 @@ public:
     st->print_cr("  " LEGEND_KEY_FMT ": %s", "limit", "memory limit, if set");
     st->print_cr("  " LEGEND_KEY_FMT ": %s", "time", "time taken for last compilation (sec)");
     st->print_cr("  " LEGEND_KEY_FMT ": %s", "type", "compiler type");
+    st->print_cr("  " LEGEND_KEY_FMT ": %s", "id", "compile id");
     st->print_cr("  " LEGEND_KEY_FMT ": %s", "#rc", "how often recompiled");
     st->print_cr("  " LEGEND_KEY_FMT ": %s", "thread", "compiler thread");
 #undef LEGEND_KEY_FMT
@@ -243,33 +467,35 @@ public:
   static void print_header(outputStream* st) {
 #define SIZE_FMT "%-10s"
     st->print(SIZE_FMT, "total");
-    for (int tag = 0; tag < Arena::tag_count(); tag++) {
+    for (int tag = 0; tag < arena_tag_max; tag++) {
       st->print(SIZE_FMT, Arena::tag_name[tag]);
     }
 #define HDR_FMT1 "%-8s%-8s%-8s%-8s"
-#define HDR_FMT2 "%-6s%-4s%-19s%s"
+#define HDR_FMT2 "%-6s%-6s%-4s%-19s%s"
 
     st->print(HDR_FMT1, "result", "#nodes", "limit", "time");
-    st->print(HDR_FMT2, "type", "#rc", "thread", "method");
+    st->print(HDR_FMT2, "type", "id", "#rc", "thread", "method");
     st->print_cr("");
   }
 
-  void print_on(outputStream* st, bool human_readable) const {
+  void print_on(outputStream* st, bool human_readable, bool by_phase) const {
     int col = 0;
 
     // Total
+    size_t v = _peak;
     if (human_readable) {
-      st->print(PROPERFMT " ", PROPERFMTARGS(_total));
+      st->print(PROPERFMT " ", PROPERFMTARGS(v));
     } else {
-      st->print("%zu ", _total);
+      st->print("%zu ", v);
     }
     col += 10; st->fill_to(col);
 
-    for (int tag = 0; tag < Arena::tag_count(); tag++) {
+    for (int tag = 0; tag < arena_tag_max; tag++) {
+      v = _peak_composition_per_arena_tag[tag];
       if (human_readable) {
-        st->print(PROPERFMT " ", PROPERFMTARGS(_peak_by_tag.counter(tag)));
+        st->print(PROPERFMT " ", PROPERFMTARGS(v));
       } else {
-        st->print("%zu ", _peak_by_tag.counter(tag));
+        st->print("%zu ", v);
       }
       col += 10; st->fill_to(col);
     }
@@ -279,8 +505,8 @@ public:
     col += 8; st->fill_to(col);
 
     // Number of Nodes when memory peaked
-    if (_live_nodes_at_peak > 0) {
-      st->print("%u ", _live_nodes_at_peak);
+    if (_live_nodes_at_global_peak > 0) {
+      st->print("%u ", _live_nodes_at_global_peak);
     } else {
       st->print("-");
     }
@@ -299,7 +525,11 @@ public:
     col += 8; st->fill_to(col);
 
     // Type
-    st->print("%s ", compilertype2name(_comptype));
+    st->print("%s ", compilertype2name(_comp_type));
+    col += 6; st->fill_to(col);
+
+    // Compile ID
+    st->print("%d ", _comp_id);
     col += 6; st->fill_to(col);
 
     // Recomp
@@ -313,11 +543,22 @@ public:
     char buf[1024];
     st->print("%s ", _method.as_C_string(buf, sizeof(buf)));
     st->cr();
+
+    // If we have detail information, print two additional tables in the next lines:
+    // One containing the counter composition at global peak, one containing the phase-local
+    // counters
+    if (_per_phase_counters != nullptr && by_phase) {
+      st->print_cr("----- By phase and arena type, at arena usage peak (%zu) -----", _peak);
+      _per_phase_counters->counters_at_global_peak.print_on(st);
+      st->print_cr("------------- Arena allocation timelime by phase -----------------");
+      _per_phase_counters->timeline.print_on(st);
+      st->print_cr("------------------------------------------------------------------");
+    }
   }
 
   int compare_by_size(const MemStatEntry* b) const {
-    const size_t x1 = b->_total;
-    const size_t x2 = _total;
+    const size_t x1 = b->_peak;
+    const size_t x2 = _peak;
     return x1 < x2 ? -1 : x1 == x2 ? 0 : 1;
   }
 };
@@ -351,11 +592,9 @@ class MemStatTable :
 {
 public:
 
-  void add(const FullMethodName& fmn, CompilerType comptype,
-           size_t total, ArenaCountersByTag peak_by_tag,
-           unsigned live_nodes_at_peak, size_t limit, const char* result) {
+  void add(const FullMethodName& fmn, const ArenaState* state, const char* result) {
     assert_lock_strong(NMTCompilationCostHistory_lock);
-    MemStatTableKey key(fmn, comptype);
+    MemStatTableKey key(fmn, state->comp_type());
     MemStatEntry** pe = get(key);
     MemStatEntry* e = nullptr;
     if (pe == nullptr) {
@@ -368,13 +607,10 @@ public:
     }
     e->set_current_time();
     e->set_current_thread();
-    e->set_comptype(comptype);
     e->inc_recompilation();
-    e->set_total(total);
-    e->set_peak_by_tag(peak_by_tag);
-    e->set_live_nodes_at_peak(live_nodes_at_peak);
-    e->set_limit(limit);
     e->set_result(result);
+
+    e->set_from_state(state);
   }
 
   // Returns a C-heap-allocated SortMe array containing all entries from the table,
@@ -386,7 +622,7 @@ public:
     MemStatEntry** flat = NEW_C_HEAP_ARRAY(MemStatEntry*, num_all, mtInternal);
     int i = 0;
     auto do_f = [&] (const MemStatTableKey& ignored, MemStatEntry* e) {
-      if (e->total() >= min_size) {
+      if (e->peak() >= min_size) {
         flat[i] = e;
         assert(i < num_all, "Sanity");
         i ++;
@@ -416,19 +652,31 @@ void CompilationMemoryStatistic::initialize() {
 
 void CompilationMemoryStatistic::on_start_compilation(const DirectiveSet* directive) {
   assert(enabled(), "Not enabled?");
+  assert(directive->should_collect_memstat(), "Don't call if not needed");
+  CompilerThread* const th = Thread::current()->as_Compiler_thread();
+  CompileTask* const task = th->task();
+  const CompilerType comp_type = task->compiler()->type();
+  const int comp_id = task->compile_id();
   const size_t limit = directive->mem_limit();
-  Thread::current()->as_Compiler_thread()->arena_stat()->start(limit);
+  const bool collect_details = directive->should_collect_memstat_details();
+  ArenaState* const arena_stat = new ArenaState(comp_type, comp_id, limit, collect_details);
+  th->set_arenastat(arena_stat);
 }
 
 void CompilationMemoryStatistic::on_end_compilation() {
   assert(enabled(), "Not enabled?");
-  ResourceMark rm;
   CompilerThread* const th = Thread::current()->as_Compiler_thread();
-  ArenaStatCounter* const arena_stat = th->arena_stat();
+  ArenaState* const arena_stat = th->arena_stat();
+  if (arena_stat == nullptr) { // not started
+    return;
+  }
+
   CompileTask* const task = th->task();
-  const CompilerType ct = task->compiler()->type();
+  assert(task->compile_id() == arena_stat->comp_id(), "Different compilation?");
 
   const Method* const m = th->task()->method();
+
+  ResourceMark rm;
   FullMethodName fmn(m);
   fmn.make_permanent();
 
@@ -456,22 +704,22 @@ void CompilationMemoryStatistic::on_end_compilation() {
     MutexLocker ml(NMTCompilationCostHistory_lock, Mutex::_no_safepoint_check_flag);
     assert(_the_table != nullptr, "not initialized");
 
-    _the_table->add(fmn, ct,
-                    arena_stat->peak(), // total
-                    arena_stat->peak_by_tag(),
-                    arena_stat->live_nodes_at_peak(),
-                    arena_stat->limit(),
-                    result);
-  }
-  if (print) {
-    char buf[1024];
-    fmn.as_C_string(buf, sizeof(buf));
-    tty->print("%s Arena usage %s: ", compilertype2name(ct), buf);
-    arena_stat->print_on(tty);
-    tty->cr();
+    _the_table->add(fmn, arena_stat, result);
   }
 
-  arena_stat->end(); // reset things
+  if (print) {
+    // Pre-assemble string to prevent tearing
+    stringStream ss;
+    ss.print("%s (%d) Arena usage", compilertype2name(arena_stat->comp_type()), arena_stat->comp_id());
+    fmn.print_on(&ss);
+    ss.print_raw(": ");
+    arena_stat->print_peak_state_on(&ss);
+    tty->print_raw(ss.base());
+  }
+
+  // Mark end of compilation by clearing out the arena state object
+  th->set_arenastat(nullptr);
+  delete arena_stat;
 }
 
 static void inform_compilation_about_oom(CompilerType ct) {
@@ -509,18 +757,22 @@ static void inform_compilation_about_oom(CompilerType ct) {
   }
 }
 
-void CompilationMemoryStatistic::on_arena_change(ssize_t diff, const Arena* arena) {
+void CompilationMemoryStatistic::on_arena_chunk_allocation_0(size_t size, int arena_tag, uint64_t* stamp) {
   assert(enabled(), "Not enabled?");
-  CompilerThread* const th = Thread::current()->as_Compiler_thread();
+  assert(arena_tag >= 0 && arena_tag < arena_tag_max, "Arena Tag OOB (%d)", arena_tag_max);
 
-  ArenaStatCounter* const arena_stat = th->arena_stat();
+  CompilerThread* const th = Thread::current()->as_Compiler_thread();
+  ArenaState* const arena_stat = th->arena_stat();
+  if (arena_stat == nullptr) { // not started
+    return;
+  }
   if (arena_stat->limit_in_process()) {
     return; // avoid recursion on limit hit
   }
 
   bool hit_limit_before = arena_stat->hit_limit();
 
-  if (arena_stat->is_active() && arena_stat->account(diff, (int)arena->get_tag())) { // new peak?
+  if (arena_stat->on_arena_chunk_allocation(size, arena_tag, stamp)) { // new peak?
 
     // Limit handling
     if (arena_stat->hit_limit()) {
@@ -544,47 +796,79 @@ void CompilationMemoryStatistic::on_arena_change(ssize_t diff, const Arena* aren
         }
       }
 
-      char message[1024] = "";
+      stringStream short_msg;
 
-      // build up message if we need it later
       if (print || crash) {
-        stringStream ss(message, sizeof(message));
         if (ct != compiler_none && name[0] != '\0') {
-          ss.print("%s %s: ", compilertype2name(ct), name);
+          short_msg.print("%s %s: ", compilertype2name(ct), name);
         }
-        ss.print("Hit MemLimit %s(limit: %zu now: %zu)",
+        short_msg.print("Hit MemLimit %s - limit: %zu now: %zu (see previous output for details)",
                  (hit_limit_before ? "again " : ""),
                  arena_stat->limit(), arena_stat->peak());
-      }
-
-      // log if needed
-      if (print) {
-        tty->print_raw(message);
+        stringStream long_msg;
+        arena_stat->print_peak_state_on(&long_msg);
+        long_msg.print_raw(short_msg.base());
+        tty->print_raw(long_msg.base());
         tty->cr();
       }
 
       // Crash out if needed
       if (crash) {
-        report_fatal(OOM_HOTSPOT_ARENA, __FILE__, __LINE__, "%s", message);
+        report_fatal(OOM_HOTSPOT_ARENA, __FILE__, __LINE__, "%s", short_msg.base());
       } else {
         inform_compilation_about_oom(ct);
       }
 
       arena_stat->set_limit_in_process(false);
-    }
+    } // end Limit handling
   }
+}
+
+void CompilationMemoryStatistic::on_arena_chunk_deallocation_0(size_t size, uint64_t stamp) {
+  assert(enabled(), "Not enabled?");
+  CompilerThread* const th = Thread::current()->as_Compiler_thread();
+  ArenaState* const arena_stat = th->arena_stat();
+  if (arena_stat == nullptr) { // not started
+    return;
+  }
+  if (arena_stat->limit_in_process()) {
+    return; // avoid recursion on limit hit
+  }
+  arena_stat->on_arena_chunk_deallocation(size, stamp);
+}
+
+void CompilationMemoryStatistic::on_phase_start_0(int phase_trc_id) {
+  assert(enabled(), "Not enabled?");
+  assert(phase_trc_id >= 0 && phase_trc_id < phase_trc_id_max, "Phase trace id OOB (%d)", phase_trc_id);
+  CompilerThread* const th = Thread::current()->as_Compiler_thread();
+  ArenaState* const arena_stat = th->arena_stat();
+  if (arena_stat == nullptr) { // not started
+    return;
+  }
+  arena_stat->on_phase_start(phase_trc_id);
+}
+
+void CompilationMemoryStatistic::on_phase_end_0(int phase_trc_id) {
+  assert(enabled(), "Not enabled?");
+  assert(phase_trc_id >= 0 && phase_trc_id < phase_trc_id_max, "Phase trace id OOB (%d)", phase_trc_id);
+  CompilerThread* const th = Thread::current()->as_Compiler_thread();
+  ArenaState* const arena_stat = th->arena_stat();
+  if (arena_stat == nullptr) { // not started
+    return;
+  }
+  arena_stat->on_phase_end(phase_trc_id);
 }
 
 static inline ssize_t diff_entries_by_size(const MemStatEntry* e1, const MemStatEntry* e2) {
   return e1->compare_by_size(e2);
 }
 
-void CompilationMemoryStatistic::print_all_by_size(outputStream* st, bool human_readable, size_t min_size) {
+void CompilationMemoryStatistic::print_all_by_size(outputStream* st, bool human_readable, bool by_phase, size_t min_size) {
 
   MutexLocker ml(NMTCompilationCostHistory_lock, Mutex::_no_safepoint_check_flag);
 
   st->cr();
-  st->print_cr("Compilation memory statistics");
+  st->print_cr("Compilation memory statistics v2");
 
   if (!enabled()) {
     st->print_cr("(unavailable)");
@@ -600,7 +884,6 @@ void CompilationMemoryStatistic::print_all_by_size(outputStream* st, bool human_
     st->print_cr(" (cutoff: %zu bytes)", min_size);
   }
   st->cr();
-
   MemStatEntry::print_header(st);
 
   MemStatEntry** filtered = nullptr;
@@ -616,7 +899,7 @@ void CompilationMemoryStatistic::print_all_by_size(outputStream* st, bool human_
       QuickSort::sort(filtered, num, diff_entries_by_size);
       // Now print. Has to happen under lock protection too, since entries may be changed.
       for (int i = 0; i < num; i ++) {
-        filtered[i]->print_on(st, human_readable);
+        filtered[i]->print_on(st, human_readable, by_phase);
       }
     } else {
       st->print_cr("No entries.");

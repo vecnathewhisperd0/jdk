@@ -3339,8 +3339,8 @@ InstanceKlass* InstanceKlass::compute_enclosing_class(bool* inner_is_member, TRA
   return outer_klass;
 }
 
-jint InstanceKlass::compute_modifier_flags() const {
-  jint access = access_flags().as_int();
+u2 InstanceKlass::compute_modifier_flags() const {
+  u2 access = access_flags().as_unsigned_short();
 
   // But check if it happens to be member class.
   InnerClassesIterator iter(this);
@@ -3360,7 +3360,7 @@ jint InstanceKlass::compute_modifier_flags() const {
     }
   }
   // Remember to strip ACC_SUPER bit
-  return (access & (~JVM_ACC_SUPER)) & JVM_ACC_WRITTEN_FLAGS;
+  return (access & (~JVM_ACC_SUPER));
 }
 
 jint InstanceKlass::jvmti_class_status() const {

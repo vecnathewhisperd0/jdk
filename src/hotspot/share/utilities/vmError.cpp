@@ -649,6 +649,12 @@ void VMError::report(outputStream* st, bool _verbose) {
   address lastpc = nullptr;
 
   BEGIN
+  if (MemTracker::enabled() &&
+      Mutex::is_bootstrapping_done() &&
+      NmtVirtualMemory_lock->owned_by_self()) {
+    // Manually unlock to avoid reentrancy due to mallocs in detailed mode.
+    NmtVirtualMemory_lock->unlock();
+  }
 
   STEP("printing fatal error message")
     st->print_cr("#");

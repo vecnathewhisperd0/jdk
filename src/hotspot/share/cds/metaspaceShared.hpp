@@ -41,7 +41,6 @@ class SerializeClosure;
 class StaticArchiveBuilder;
 
 template<class E> class Array;
-template<class E> class GrowableArray;
 
 enum MapArchiveResult {
   MAP_ARCHIVE_SUCCESS,

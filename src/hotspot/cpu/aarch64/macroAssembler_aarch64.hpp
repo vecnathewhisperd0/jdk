@@ -1469,14 +1469,11 @@ public:
 
   public:
 
-  void ldr_constant(Register dest, const Address &const_addr) {
-    if (NearCpool) {
-      ldr(dest, const_addr);
-    } else {
-      uint64_t offset;
-      adrp(dest, InternalAddress(const_addr.target()), offset);
-      ldr(dest, Address(dest, offset));
-    }
+  void ldr_patchable(Register dest, const Address &const_addr) {
+    // Using adrp+ldr for distant addresses (a single PC-relative ldr has a ±1MB limit)
+    uint64_t offset;
+    adrp(dest, const_addr, offset);
+    ldr(dest, Address(dest, offset));
   }
 
   address read_polling_page(Register r, relocInfo::relocType rtype);

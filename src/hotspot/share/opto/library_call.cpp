@@ -120,9 +120,7 @@ JVMState* LibraryIntrinsic::generate(JVMState* jvms) {
     const char *inline_msg = is_virtual() ? "(intrinsic, virtual)"
                                           : "(intrinsic)";
     CompileTask::print_inlining_ul(callee, jvms->depth() - 1, bci, InliningResult::SUCCESS, inline_msg);
-    if (C->print_intrinsics() || C->print_inlining()) {
-      C->print_inlining(callee, jvms->depth() - 1, bci, InliningResult::SUCCESS, inline_msg);
-    }
+    C->inline_printer()->record(callee, jvms, InliningResult::SUCCESS, inline_msg);
     C->gather_intrinsic_statistics(intrinsic_id(), is_virtual(), Compile::_intrinsic_worked);
     if (C->log()) {
       C->log()->elem("intrinsic id='%s'%s nodes='%d'",
@@ -132,7 +130,6 @@ JVMState* LibraryIntrinsic::generate(JVMState* jvms) {
     }
     // Push the result from the inlined method onto the stack.
     kit.push_result();
-    C->print_inlining_update(this);
     return kit.transfer_exceptions_into_jvms();
   }
 
@@ -148,9 +145,7 @@ JVMState* LibraryIntrinsic::generate(JVMState* jvms) {
                          : "failed to inline (intrinsic), method not annotated";
     }
     CompileTask::print_inlining_ul(callee, jvms->depth() - 1, bci, InliningResult::FAILURE, msg);
-    if (C->print_intrinsics() || C->print_inlining()) {
-      C->print_inlining(callee, jvms->depth() - 1, bci, InliningResult::FAILURE, msg);
-    }
+    C->inline_printer()->record(callee, jvms, InliningResult::FAILURE, msg);
   } else {
     // Root compile
     ResourceMark rm;
@@ -165,7 +160,6 @@ JVMState* LibraryIntrinsic::generate(JVMState* jvms) {
     }
   }
   C->gather_intrinsic_statistics(intrinsic_id(), is_virtual(), Compile::_intrinsic_failed);
-  C->print_inlining_update(this);
 
   return nullptr;
 }
@@ -191,9 +185,8 @@ Node* LibraryIntrinsic::generate_predicate(JVMState* jvms, int predicate) {
     const char *inline_msg = is_virtual() ? "(intrinsic, virtual, predicate)"
                                           : "(intrinsic, predicate)";
     CompileTask::print_inlining_ul(callee, jvms->depth() - 1, bci, InliningResult::SUCCESS, inline_msg);
-    if (C->print_intrinsics() || C->print_inlining()) {
-      C->print_inlining(callee, jvms->depth() - 1, bci, InliningResult::SUCCESS, inline_msg);
-    }
+    C->inline_printer()->record(callee, jvms, InliningResult::SUCCESS, inline_msg);
+
     C->gather_intrinsic_statistics(intrinsic_id(), is_virtual(), Compile::_intrinsic_worked);
     if (C->log()) {
       C->log()->elem("predicate_intrinsic id='%s'%s nodes='%d'",
@@ -209,9 +202,7 @@ Node* LibraryIntrinsic::generate_predicate(JVMState* jvms, int predicate) {
     // Not a root compile.
     const char* msg = "failed to generate predicate for intrinsic";
     CompileTask::print_inlining_ul(kit.callee(), jvms->depth() - 1, bci, InliningResult::FAILURE, msg);
-    if (C->print_intrinsics() || C->print_inlining()) {
-      C->print_inlining(kit.callee(), jvms->depth() - 1, bci, InliningResult::FAILURE, msg);
-    }
+    C->inline_printer()->record(kit.callee(), jvms, InliningResult::FAILURE, msg);
   } else {
     // Root compile
     ResourceMark rm;
@@ -221,9 +212,7 @@ Node* LibraryIntrinsic::generate_predicate(JVMState* jvms, int predicate) {
                      is_virtual() ? " (virtual)" : "", bci);
     const char *msg = msg_stream.freeze();
     log_debug(jit, inlining)("%s", msg);
-    if (C->print_intrinsics() || C->print_inlining()) {
-      C->print_inlining_stream()->print("%s", msg);
-    }
+    C->inline_printer()->record(kit.callee(), jvms, InliningResult::FAILURE, msg);
   }
   C->gather_intrinsic_statistics(intrinsic_id(), is_virtual(), Compile::_intrinsic_failed);
   return nullptr;

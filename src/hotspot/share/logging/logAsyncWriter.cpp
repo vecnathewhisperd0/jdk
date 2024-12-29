@@ -27,29 +27,46 @@
 #include "logging/logConfiguration.hpp"
 #include "logging/logFileOutput.hpp"
 #include "logging/logFileStreamOutput.hpp"
-#include "logging/logHandle.hpp"
+#include "memory/allocation.hpp"
 #include "memory/resourceArea.hpp"
 #include "runtime/atomic.hpp"
-#include "runtime/os.inline.hpp"
 
-class AsyncLogWriter::AsyncLogLocker : public StackObj {
+class AsyncLogWriter::ProducerLocker : public StackObj {
  public:
-  AsyncLogLocker() {
+  ProducerLocker() {
     assert(_instance != nullptr, "AsyncLogWriter::_lock is unavailable");
-    _instance->_lock.lock();
+    _instance->_producer_lock.lock();
   }
 
-  ~AsyncLogLocker() {
-    _instance->_lock.unlock();
+  ~ProducerLocker() {
+    _instance->_producer_lock.unlock();
   }
+
+  void notify() { _instance->_consumer_lock.notify(); }
+  void wait() { _instance->_consumer_lock.wait(0); }
+};
+
+class AsyncLogWriter::ConsumerLocker : public StackObj {
+ public:
+  ConsumerLocker() {
+    assert(_instance != nullptr, "AsyncLogWriter::_lock is unavailable");
+    _instance->_consumer_lock.lock();
+  }
+
+  ~ConsumerLocker() {
+    _instance->_consumer_lock.unlock();
+  }
+
+  void notify() { _instance->_consumer_lock.notify(); }
+  void wait() { _instance->_consumer_lock.wait(0); }
 };
 
 // LogDecorator::None applies to 'constant initialization' because of its constexpr constructor.
 const LogDecorations& AsyncLogWriter::None = LogDecorations(LogLevel::Warning, LogTagSetMapping<LogTag::__NO_TAG>::tagset(),
                                       LogDecorators::None);
 
-bool AsyncLogWriter::Buffer::push_back(LogFileStreamOutput* output, const LogDecorations& decorations, const char* msg) {
-  const size_t len = strlen(msg);
+bool AsyncLogWriter::Buffer::push_back(LogFileStreamOutput* output, const LogDecorations& decorations, const char* msg, const size_t msg_len) {
+  const size_t len = msg_len;
   const size_t sz = Message::calc_size(len);
   const bool is_token = output == nullptr;
   // Always leave headroom for the flush token. Pushing a token must succeed.
@@ -65,7 +82,7 @@ bool AsyncLogWriter::Buffer::push_back(LogFileStreamOutput* output, const LogDec
 }
 
 void AsyncLogWriter::Buffer::push_flush_token() {
-  bool result = push_back(nullptr, AsyncLogWriter::None, "");
+  bool result = push_back(nullptr, AsyncLogWriter::None, "", 0);
   assert(result, "fail to enqueue the flush token.");
 }
 
@@ -74,36 +91,58 @@ void AsyncLogWriter::enqueue_locked(LogFileStreamOutput* output, const LogDecora
   // client should use "" instead.
   assert(msg != nullptr, "enqueuing a null message!");
 
-  if (!_buffer->push_back(output, decorations, msg)) {
-    bool p_created;
-    uint32_t* counter = _stats.put_if_absent(output, 0, &p_created);
-    *counter = *counter + 1;
+  size_t msg_len = strlen(msg);
+
+  ConsumerLocker clocker;
+  if (_buffer->push_back(output, decorations, msg, msg_len)) {
+    _data_available = true;
+    clocker.notify();
     return;
   }
 
-  _data_available = true;
-  _lock.notify();
+  if (LogConfiguration::async_mode() == LogConfiguration::AsyncMode::Stall) {
+    size_t size = Message::calc_size(msg_len);
+    void* ptr = os::malloc(size, mtLogging);
+    if (ptr == nullptr) {
+      // Out of memory. We bail without any notice.
+      // Some other part of the system will probably fail later.
+      return;
+    }
+    new (ptr) Message(output, decorations, msg, msg_len);
+    _stalled_message = (Message*)ptr;
+    while (_stalled_message != nullptr) {
+      clocker.wait();
+    }
+    os::free(ptr);
+  } else {
+    bool p_created;
+    uint32_t* counter = _stats.put_if_absent(output, 0, &p_created);
+    *counter = *counter + 1;
+  }
 }
 
 void AsyncLogWriter::enqueue(LogFileStreamOutput& output, const LogDecorations& decorations, const char* msg) {
-  AsyncLogLocker locker;
+  ProducerLocker plocker;
   enqueue_locked(&output, decorations, msg);
 }
 
 // LogMessageBuffer consists of a multiple-part/multiple-line message.
 // The lock here guarantees its integrity.
 void AsyncLogWriter::enqueue(LogFileStreamOutput& output, LogMessageBuffer::Iterator msg_iterator) {
-  AsyncLogLocker locker;
-
+  ProducerLocker plocker;
   for (; !msg_iterator.is_at_end(); msg_iterator++) {
     enqueue_locked(&output, msg_iterator.decorations(), msg_iterator.message());
   }
 }
 
 AsyncLogWriter::AsyncLogWriter()
-  : _flush_sem(0), _lock(), _data_available(false),
+  : _flush_sem(0),
+    _producer_lock(),
+    _consumer_lock(),
+    _data_available(false),
     _initialized(false),
-    _stats() {
+    _stats(),
+    _stalled_message(nullptr) {
 
   size_t size = AsyncLogBufferSize / 2;
   _buffer = new Buffer(size);
@@ -153,10 +192,10 @@ void AsyncLogWriter::run() {
     ResourceMark rm;
     AsyncLogMap<AnyObj::RESOURCE_AREA> snapshot;
     {
-      AsyncLogLocker locker;
+      ConsumerLocker clocker;
 
-      while (!_data_available) {
-        _lock.wait(0/* no timeout */);
+      while (!_data_available && _stalled_message == nullptr) {
+        clocker.wait();
       }
       // Only doing a swap and statistics under the lock to
       // guarantee that I/O jobs don't block logsites.
@@ -174,7 +213,17 @@ void AsyncLogWriter::run() {
       });
       _data_available = false;
     }
+
     write(snapshot);
+
+    if (_stalled_message != nullptr) {
+      assert(LogConfiguration::async_mode() == LogConfiguration::AsyncMode::Stall, "must be");
+      ConsumerLocker clocker;
+      Message* m = (Message*)_stalled_message;
+      m->output()->write_blocking(m->decorations(), m->message());
+      _stalled_message = nullptr;
+      clocker.notify();
+    }
   }
 }
 
@@ -212,11 +261,12 @@ AsyncLogWriter* AsyncLogWriter::instance() {
 void AsyncLogWriter::flush() {
   if (_instance != nullptr) {
     {
-      AsyncLogLocker locker;
+      ProducerLocker plocker;
+      ConsumerLocker clocker;
       // Push directly in-case we are at logical max capacity, as this must not get dropped.
       _instance->_buffer->push_flush_token();
       _instance->_data_available = true;
-      _instance->_lock.notify();
+      clocker.notify();
     }
 
     _instance->_flush_sem.wait();
@@ -224,7 +274,7 @@ void AsyncLogWriter::flush() {
 }
 
 AsyncLogWriter::BufferUpdater::BufferUpdater(size_t newsize) {
-  AsyncLogLocker locker;
+  ConsumerLocker clocker;
   auto p = AsyncLogWriter::_instance;
 
   _buf1 = p->_buffer;
@@ -238,7 +288,7 @@ AsyncLogWriter::BufferUpdater::~BufferUpdater() {
   auto p = AsyncLogWriter::_instance;
 
   {
-    AsyncLogLocker locker;
+    ConsumerLocker clocker;
 
     delete p->_buffer;
     delete p->_buffer_staging;

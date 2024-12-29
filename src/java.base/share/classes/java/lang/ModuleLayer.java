@@ -48,6 +48,7 @@ import jdk.internal.javac.Restricted;
 import jdk.internal.loader.ClassLoaderValue;
 import jdk.internal.loader.Loader;
 import jdk.internal.loader.LoaderPool;
+import jdk.internal.module.Modules;
 import jdk.internal.module.ServicesCatalog;
 import jdk.internal.misc.CDS;
 import jdk.internal.reflect.CallerSensitive;
@@ -297,6 +298,68 @@ public final class ModuleLayer {
             ensureInLayer(source);
             source.implAddOpens(pn, target);
             return this;
+        }
+
+        /**
+         * Updates module {@code source} in the layer to use a service.
+         *
+         * @param  source
+         *         The source module
+         * @param  service
+         *         The service class
+         *
+         * @return This controller
+         *
+         * @throws IllegalArgumentException
+         *         If {@code source} is not in the module layer
+         *
+         * @see Module#addUses
+         *
+         * @since 25
+         */
+        public Controller addUses(Module source, Class<?> service) {
+            ensureInLayer(source);
+            source.implAddUses(service);
+            return this;
+        }
+
+        /**
+         * Updates the layer to locate a service of the given type using
+         * the given implementation class.
+         *
+         * @param  service
+         *         The service class
+         * @param  impl
+         *         The implementation class
+         *
+         * @return This controller
+         *
+         * @throws IllegalArgumentException
+         *         If {@code impl} is not an appropriate service provider for
+         *         {@code service}
+         *
+         * @since 25
+         */
+        public Controller addProvider(Class<?> service, Class<?> impl) {
+            Module implModule = impl.getModule();
+            Class<?> providerType;
+            if (implModule.isNamed()
+                && (providerType = getProviderMethodType(impl)) != null
+                && ! service.isAssignableFrom(providerType)
+                || ! service.isAssignableFrom(impl)) {
+                throw new IllegalArgumentException("Implementation " + impl + " does not implment or provide " + service);
+            } else {
+                Modules.addProvider(layer, service, impl);
+            }
+            return this;
+        }
+
+        private static Class<?> getProviderMethodType(Class<?> implClass) {
+            try {
+                return implClass.getMethod("provider").getReturnType();
+            } catch (NoSuchMethodException e) {
+                return null;
+            }
         }
 
         /**
